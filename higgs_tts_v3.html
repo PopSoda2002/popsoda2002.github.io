@@ -930,10 +930,6 @@ footer.site .sig{font-family:var(--mono);font-size:11px;letter-spacing:.15em;tex
     <div class="demo-bar"><i></i><i></i><i></i><span style="margin-left:10px">POST /v1/audio/speech · model: higgs-audio-v3-tts</span></div>
     <div class="demo-body">
       <div class="d-row">
-        <div class="d-label"><span>API KEY</span><span class="hint">paste a key, or open this page with ?key=… in the URL — stored only in your browser</span></div>
-        <input type="password" id="apiKey" autocomplete="off" spellcheck="false">
-      </div>
-      <div class="d-row">
         <div class="d-label"><span>STEP 1 · REFERENCE VOICE</span><span class="hint">3–15s of speech works best · skip to use the default voice</span></div>
         <div class="btn-row">
           <button class="btn rec" id="recBtn">● RECORD MIC</button>
@@ -1334,14 +1330,12 @@ tlMake('tlRace',{period:8,lanes:[
   const API_URL='https://api.boson.ai/v1/audio/speech';
   const SAMPLE_RATE=24000;
   const $=id=>document.getElementById(id);
-  const keyEl=$('apiKey'),status=$('status');
-  // key sources, in priority order: ?key= URL param > localStorage > manual paste.
-  // The key is deliberately NOT embedded in this public page's source.
+  const status=$('status');
+  // The key comes silently from the ?key= URL param (then persists in localStorage).
+  // It is deliberately NOT embedded in this public page's source and never shown in the UI.
   const urlKey=new URLSearchParams(location.search).get('key');
   if(urlKey){localStorage.setItem('boson_key',urlKey);history.replaceState(null,'',location.pathname+location.hash)}
-  keyEl.value=urlKey||localStorage.getItem('boson_key')||'';
-  keyEl.placeholder='bai-…  (paste a Boson AI API key, or open this page with ?key=…)';
-  keyEl.addEventListener('change',()=>localStorage.setItem('boson_key',keyEl.value.trim()));
+  const apiKey=()=>(localStorage.getItem('boson_key')||'').trim();
   function say(msg,cls){status.innerHTML=cls?('<span class="'+cls+'">'+msg+'</span>'):msg}
   const fmt=ms=>ms<1000?Math.round(ms)+' ms':(ms/1000).toFixed(2)+' s';
 
@@ -1410,7 +1404,7 @@ tlMake('tlRace',{period:8,lanes:[
   }
   function guard(){
     if(!$('ttsText').value.trim()){say('Type some text first.','err');return false}
-    if(!keyEl.value.trim()){say('An API key is required.','err');return false}
+    if(!apiKey()){say('No access key — please open this page via the shared link.','err');return false}
     return true;
   }
 
@@ -1421,7 +1415,7 @@ tlMake('tlRace',{period:8,lanes:[
     say('Non-streaming: waiting for the complete MP3…');
     try{
       const r=await fetch(API_URL,{method:'POST',
-        headers:{'Authorization':'Bearer '+keyEl.value.trim(),'Content-Type':'application/json'},
+        headers:{'Authorization':'Bearer '+apiKey(),'Content-Type':'application/json'},
         body:JSON.stringify(buildBody({response_format:'mp3'}))});
       if(!r.ok)throw new Error('HTTP '+r.status+' — '+(await r.text()).slice(0,200));
       const blob=await r.blob();
@@ -1441,7 +1435,7 @@ tlMake('tlRace',{period:8,lanes:[
     say('Streaming: PCM chunks play as they arrive…');
     try{
       const r=await fetch(API_URL,{method:'POST',
-        headers:{'Authorization':'Bearer '+keyEl.value.trim(),'Content-Type':'application/json'},
+        headers:{'Authorization':'Bearer '+apiKey(),'Content-Type':'application/json'},
         body:JSON.stringify(buildBody({response_format:'pcm',stream:true}))});
       if(!r.ok)throw new Error('HTTP '+r.status+' — '+(await r.text()).slice(0,200));
       playCtx=new (window.AudioContext||window.webkitAudioContext)({sampleRate:SAMPLE_RATE});
