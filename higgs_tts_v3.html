@@ -707,7 +707,7 @@ footer.site .sig{font-family:var(--mono);font-size:11px;letter-spacing:.15em;tex
         <h3>1 · Preprocessing</h3>
         <p>Tokenizes text, loads the reference audio. Negligible FLOPs — but every stage hop costs a queue and a serialization boundary.</p>
         <span class="mono-note">text + ref audio → tensors</span>
-        <div class="opts"><span>fused into encoder stage</span></div>
+        <div class="opts"><span>CPU SimpleScheduler</span></div>
       </div>
       <div class="node">
         <span class="tag gpu">GPU · STATIC COMPUTE</span>
@@ -758,27 +758,24 @@ footer.site .sig{font-family:var(--mono);font-size:11px;letter-spacing:.15em;tex
 
   <!-- PREPROCESSING -->
   <div class="dive reveal">
-    <div class="dive-head"><span class="sno">A</span><h3>Preprocessing <span class="en">— the stage that optimized itself away</span></h3></div>
-    <div class="dive-meta">CPU · tokenization + reference-audio I/O · fused into the encoder stage</div>
+    <div class="dive-head"><span class="sno">A</span><h3>Preprocessing <span class="en">— CPU work gets a CPU scheduler</span></h3></div>
+    <div class="dive-meta">CPU · tokenization + reference-audio I/O · SimpleScheduler</div>
     <div class="dive-grid">
       <div class="dive-what"><div class="dw-text">
-        <p>Tokenize text, load the reference audio. Almost <b>zero FLOPs</b> — the real cost is the <b>stage hop</b>: serialization, an IPC trip, a queue, a scheduling decision.</p>
-        <p>A stage this light can't justify its own hop. The fix is structural: <b>delete the boundary, not the work</b>.</p>
+        <p>Tokenize text, load and decode the reference audio. Pure <b>CPU + I/O work</b> — it needs none of the GPU scheduler's machinery (batching, KV cache, CUDA graphs).</p>
+        <p>So it runs under a lean CPU-side <code>SimpleScheduler</code>: the CPU preps the next requests while the GPU stages work on earlier ones.</p>
         </div>
         <div class="spec">
           <span class="sl">work</span> &nbsp;text → token ids · audio file → waveform tensor<br>
           <span class="sl">cost</span> &nbsp;I/O-bound, negligible FLOPs<br>
-          <span class="sl">real tax</span> &nbsp;serialize + IPC + queue + schedule, <b>per hop</b><br>
-          <span class="sl">fix</span> &nbsp;<b>stage fusion</b> — preprocessing rides inside the encoder stage
+          <span class="sl">scheduler</span> &nbsp;<b>SimpleScheduler</b> on CPU — no GPU machinery
         </div>
       </div>
       <div class="moves">
         <div class="move">
-          <div class="m-name"><span class="mk">FUSE</span>Merge preprocessing into the encoder stage</div>
-          <p>Preprocessing now runs <b>inside</b> the encoder stage — one fewer hop for every request.</p>
+          <div class="m-name"><span class="mk">SCHED</span>Pipelined off the GPU's critical path</div>
           <div class="tl" id="tlPre"></div>
-          <p class="fig-cap">The red block is pure <b class="bad">serialization + queueing</b>, not compute. Fusion deletes it outright.</p>
-          <div class="pr-row"><a class="pr" href="https://github.com/sgl-project/sglang-omni/issues/576" target="_blank">#576</a></div>
+          <p class="fig-cap">While the GPU serves request 1, the CPU is already preprocessing requests 2 and 3 — <b>the GPU never waits on I/O</b>.</p>
         </div>
       </div>
     </div>
@@ -1101,10 +1098,10 @@ tlMake('tlAsync',{period:9,lanes:[
   ]});
 })();
 
-/* 04A — preprocessing: stage hop vs fused */
-tlMake('tlPre',{period:7,lanes:[
-  {label:'separate stage',segs:[{t0:.02,t1:.16,cls:'c-cpu',label:'preprocess'},{t0:.16,t1:.34,cls:'c-sync',label:'serialize · IPC · queue'},{t0:.34,t1:.58,cls:'c-enc',label:'encode'}],marks:[{t:.58,html:'encode done',dim:true}]},
-  {label:'fused (#576)',segs:[{t0:.02,t1:.16,cls:'c-cpu',label:'preprocess'},{t0:.16,t1:.40,cls:'c-enc',label:'encode — same process, no hop'}],marks:[{t:.40,html:'done sooner — hop deleted'}]}
+/* 04A — preprocessing: CPU scheduler pipelines off the GPU path */
+tlMake('tlPre',{period:8,lanes:[
+  {label:'CPU · preprocess',segs:[{t0:.02,t1:.16,cls:'c-cpu',label:'req 1'},{t0:.18,t1:.32,cls:'c-cpu',label:'req 2'},{t0:.34,t1:.48,cls:'c-cpu',label:'req 3'}]},
+  {label:'GPU · enc + AR',segs:[{t0:.16,t1:.24,cls:'c-enc'},{t0:.24,t1:.52,cls:'c-ar',label:'req 1'},{t0:.52,t1:.60,cls:'c-enc'},{t0:.60,t1:.88,cls:'c-ar',label:'req 2'}],marks:[{t:.52,html:'req 2 ready before the GPU asks'}]}
 ]});
 
 /* 04A — encoder torch.compile: kernel fusion */
