@@ -760,9 +760,38 @@ footer.site .sig{font-family:var(--mono);font-size:11px;letter-spacing:.15em;tex
     whose stated goal was <b>"low latency and high throughput with no model performance reduction."</b>
   </p>
 
+  <!-- PREPROCESSING -->
+  <div class="dive reveal">
+    <div class="dive-head"><span class="sno">A</span><h3>Preprocessing <span class="en">— the stage that optimized itself away</span></h3></div>
+    <div class="dive-meta">CPU · tokenization + reference-audio I/O · fused into the encoder stage</div>
+    <div class="dive-grid">
+      <div class="dive-what"><div class="dw-text">
+        <p>The CPU-side stage: tokenize the input text, load the reference audio file, decode and resample it into a waveform tensor. Almost <b>zero FLOPs</b> — so why does it deserve a deep dive?</p>
+        <p>Because in a multi-stage pipeline its real cost isn't compute, it's the <b>stage hop</b>: every boundary a request crosses means serializing tensors, an IPC trip across the data plane, sitting in another queue, and another scheduling decision. At high QPS, hops add latency — and worse, <b>jitter</b>.</p>
+        <p>A stage this light can't justify its own hop. The optimization is structural: <b>delete the boundary</b>, not the work.</p>
+        </div>
+        <div class="spec">
+          <span class="sl">work</span> &nbsp;text → token ids · audio file → waveform tensor<br>
+          <span class="sl">cost</span> &nbsp;I/O-bound, negligible FLOPs<br>
+          <span class="sl">real tax</span> &nbsp;serialize + IPC + queue + schedule, <b>per hop</b><br>
+          <span class="sl">fix</span> &nbsp;<b>stage fusion</b> — preprocessing rides inside the encoder stage
+        </div>
+      </div>
+      <div class="moves">
+        <div class="move">
+          <div class="m-name"><span class="mk">FUSE</span>Merge preprocessing into the encoder stage</div>
+          <p>Preprocessing now runs as the first step <b>inside</b> the encoder stage's process: same scheduler, same queue, no tensor serialization in between. One fewer coordinator hop for every single request.</p>
+          <div class="tl" id="tlPre"></div>
+          <p class="fig-cap">The red block is not compute — it's <b class="bad">serialization + queueing + scheduling</b> between two processes. Fusing the stages deletes it outright: encoding starts as soon as the waveform tensor exists.</p>
+          <div class="pr-row"><a class="pr" href="https://github.com/sgl-project/sglang-omni/issues/576" target="_blank">#576</a></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- ENCODER -->
   <div class="dive reveal">
-    <div class="dive-head"><span class="sno">A</span><h3>Encoder <span class="en">— the fastest compute is no compute</span></h3></div>
+    <div class="dive-head"><span class="sno">B</span><h3>Encoder <span class="en">— the fastest compute is no compute</span></h3></div>
     <div class="dive-meta">LRU cache · batched encoding · torch.compile</div>
     <div class="dive-grid">
       <div class="dive-what"><div class="dw-text">
@@ -783,10 +812,13 @@ footer.site .sig{font-family:var(--mono);font-size:11px;letter-spacing:.15em;tex
           <div class="pr-row"><a class="pr" href="https://github.com/sgl-project/sglang-omni/issues/562" target="_blank">#562</a><a class="pr" href="https://github.com/sgl-project/sglang-omni/pull/563" target="_blank">#563</a><a class="pr" href="https://github.com/sgl-project/sglang-omni/pull/605" target="_blank">#605</a></div>
         </div>
         <div class="move">
-          <div class="m-name"><span class="mk">BATCH</span>Batched encoder — with a production twist</div>
-          <p>Length-bucketed batch encoding lifts throughput on paper. Measured in production, it turned GPU utilization into <b>bursty spikes</b> that fought the concurrent AR loops for SMs. Verdict: keep it for <b>offline warmup</b> (pre-populating the voice cache at server start); the online path encodes in isolation.</p>
+          <div class="m-name"><span class="mk">BATCH</span>Batched encoder — real benefit, wrong place</div>
+          <p><b>What it is:</b> instead of encoding reference audios one at a time, collect several pending ones, group them into <b>length buckets</b> (so short clips aren't padded out to the longest), zero-pad within the bucket, and run one <code>[B, T]</code> forward. A convolutional codec at batch 1 leaves most of the GPU's SMs idle — batching fills them, and one kernel-launch sequence is amortized over B requests.</p>
+          <p><b>Is there a gain? Yes</b> — measured in isolation, per-audio encode cost drops markedly; that's why it was built (#603/#610). <b>But not online:</b> in the live server the encoder shares the GPU with 16 latency-critical AR decode loops. Batched encodes arrive as <b>bursts</b> that grab a large slice of SMs at once, and every burst showed up as a stall in someone's decode — per-encode throughput up, end-to-end tail latency worse.</p>
+          <p><b>Verdict:</b> keep the win where it's free. At server start, <b>offline warmup</b> batch-encodes the whole voice bank into the LRU cache at full batched speed — there's no competing traffic to hurt. The online path encodes one at a time, in isolation.</p>
           <div class="tl" id="tlBatchBad"><div class="tl-title bad"><b>✕ ONLINE BATCHED ENCODE</b> — encode bursts steal SMs, AR loops stall</div></div>
-          <div class="tl" id="tlBatchGood"><div class="tl-title good"><b>✓ OFFLINE WARMUP</b> — batch once at startup, online traffic runs smooth</div></div>
+          <div class="tl" id="tlBatchGood"><div class="tl-title good"><b>✓ OFFLINE WARMUP</b> — same batched speed at startup, zero contention online</div></div>
+          <p class="fig-cap">Batching the encoder is a real optimization — for <b>throughput in isolation</b>. In a mixed pipeline, the latency-critical AR loops outrank it, so the batch win is harvested offline and the online path stays smooth.</p>
           <div class="pr-row"><a class="pr" href="https://github.com/sgl-project/sglang-omni/issues/603" target="_blank">#603</a><a class="pr" href="https://github.com/sgl-project/sglang-omni/pull/610" target="_blank">#610</a></div>
         </div>
         <div class="move">
@@ -802,7 +834,7 @@ footer.site .sig{font-family:var(--mono);font-size:11px;letter-spacing:.15em;tex
 
   <!-- AR -->
   <div class="dive reveal">
-    <div class="dive-head"><span class="sno">B</span><h3>AR Engine <span class="en">— CUDA graphs, radix cache, paged attention</span></h3></div>
+    <div class="dive-head"><span class="sno">C</span><h3>AR Engine <span class="en">— CUDA graphs, radix cache, paged attention</span></h3></div>
     <div class="dive-meta">Qwen3-4B backbone · fused 8-codebook head · 400–800 steps per 10s of speech</div>
     <div class="dive-grid">
       <div class="dive-what"><div class="dw-text">
@@ -871,7 +903,7 @@ footer.site .sig{font-family:var(--mono);font-size:11px;letter-spacing:.15em;tex
 
   <!-- VOCODER -->
   <div class="dive reveal">
-    <div class="dive-head"><span class="sno">C</span><h3>Vocoder <span class="en">— streaming without the clicks</span></h3></div>
+    <div class="dive-head"><span class="sno">D</span><h3>Vocoder <span class="en">— streaming without the clicks</span></h3></div>
     <div class="dive-meta">DAC decoder · ~10ms per call · batched decode + windowed streaming</div>
     <div class="dive-grid">
       <div class="dive-what"><div class="dw-text">
@@ -1113,6 +1145,12 @@ tlMake('tlBlock',{period:7,lanes:[
 tlMake('tlAhead',{period:7,lanes:[
   {label:'GPU',segs:[{t0:.00,t1:.18,cls:'c-ar',label:'step t'},{t0:.18,t1:.36,cls:'c-ar',label:'step t+1'},{t0:.36,t1:.54,cls:'c-ar',label:'step t+2'}]},
   {label:'CPU',segs:[{t0:.19,t1:.27,cls:'c-cpu',label:'process t'},{t0:.37,t1:.45,cls:'c-cpu',label:'t+1'}],marks:[{t:.54,html:'3 steps · 54% — CPU hidden'}]}
+]});
+
+/* 04A — preprocessing: stage hop vs fused */
+tlMake('tlPre',{period:7,lanes:[
+  {label:'separate stage',segs:[{t0:.02,t1:.16,cls:'c-cpu',label:'preprocess'},{t0:.16,t1:.34,cls:'c-sync',label:'serialize · IPC · queue'},{t0:.34,t1:.58,cls:'c-enc',label:'encode'}],marks:[{t:.58,html:'encode done',dim:true}]},
+  {label:'fused (#576)',segs:[{t0:.02,t1:.16,cls:'c-cpu',label:'preprocess'},{t0:.16,t1:.40,cls:'c-enc',label:'encode — same process, no hop'}],marks:[{t:.40,html:'done sooner — hop deleted'}]}
 ]});
 
 /* 04A — encoder: LRU cache hit vs miss */
