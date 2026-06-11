@@ -191,7 +191,7 @@ a.pr:hover{color:var(--green-soft);border-color:var(--green)}
 }
 .tl-mark.lit{opacity:1}
 .tl-mark.dim{color:var(--paper-faint)}
-.fig-cap{font-family:var(--mono);font-size:11px;color:var(--paper-faint);margin-top:8px;line-height:1.65}
+.fig-cap{font-family:var(--mono);font-size:11px;color:var(--paper-faint);margin-top:8px;line-height:1.65;max-width:940px}
 .fig-cap b{color:var(--green-soft);font-weight:500}
 .fig-cap .bad{color:var(--red)}
 .legend-row{display:flex;flex-wrap:wrap;gap:18px;margin-top:10px;font-family:var(--mono);font-size:10.5px;color:var(--paper-faint)}
@@ -357,13 +357,15 @@ a.pr:hover{color:var(--green-soft);border-color:var(--green)}
 .dive-head h3{font-family:var(--display);font-weight:400;font-size:clamp(26px,3.4vw,40px)}
 .dive-head h3 .en{color:var(--green-soft)}
 .dive-meta{font-family:var(--mono);font-size:11px;letter-spacing:.2em;color:var(--blue);margin-bottom:14px;text-transform:uppercase}
-.dive-grid{display:grid;grid-template-columns:minmax(0,.9fr) minmax(0,1.1fr);gap:34px;align-items:start}
-@media(max-width:980px){.dive-grid{grid-template-columns:1fr;gap:36px}}
-.dive-what{font-size:14.5px;color:var(--paper-dim)}
-.dive-what p{margin-bottom:10px}
+.dive-grid{display:block}
+
+.dive-what{font-size:14.5px;color:var(--paper-dim);display:grid;grid-template-columns:minmax(0,1.5fr) minmax(0,1fr);gap:26px;align-items:start;margin-bottom:16px}
+@media(max-width:880px){.dive-what{grid-template-columns:1fr;gap:14px}}
+.dw-text p{margin-bottom:10px}
+.dw-text p:last-child{margin-bottom:0}
 .dive-what b{color:var(--paper);font-weight:500}
 .spec{
-  margin-top:14px;border:1px dashed var(--line-2);padding:12px 16px;
+  margin-top:0;border:1px dashed var(--line-2);padding:12px 16px;
   font-family:var(--mono);font-size:12px;color:var(--paper-dim);line-height:2;
 }
 .spec b{color:var(--blue-soft);font-weight:500}
@@ -376,7 +378,7 @@ a.pr:hover{color:var(--green-soft);border-color:var(--green)}
 .move:hover{border-left-color:var(--green)}
 .move .m-name{font-weight:500;font-size:15px;color:var(--paper);margin-bottom:8px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 .move .m-name .mk{font-family:var(--mono);font-size:10px;color:var(--green);border:1px solid rgba(7,196,0,.45);padding:2px 7px;letter-spacing:.1em}
-.move p{font-size:13px;color:var(--paper-dim);line-height:1.7;margin-bottom:5px}
+.move p{font-size:13px;color:var(--paper-dim);line-height:1.7;margin-bottom:5px;max-width:940px}
 .move p:last-of-type{margin-bottom:0}
 .move p b{color:var(--paper);font-weight:500}
 .move.cut{border-left-color:var(--red)}
@@ -763,10 +765,10 @@ footer.site .sig{font-family:var(--mono);font-size:11px;letter-spacing:.15em;tex
     <div class="dive-head"><span class="sno">A</span><h3>Encoder <span class="en">— the fastest compute is no compute</span></h3></div>
     <div class="dive-meta">LRU cache · batched encoding · torch.compile</div>
     <div class="dive-grid">
-      <div class="dive-what">
+      <div class="dive-what"><div class="dw-text">
         <p>The encoder's profile: <b>expensive (50–100ms), deterministic, and repetitive</b>. The same reference voice produces the same tokens every time, and production users reuse a handful of voices across thousands of prompts. Most encoder work is recomputation of known answers.</p>
         <p>So the order of attack: <b>skip it</b> (cache), <b>amortize it</b> (batch), <b>compile it</b> (a static convolutional graph — the one place torch.compile genuinely fits).</p>
-        <div class="spec">
+        </div><div class="spec">
           <span class="sl">arch</span> &nbsp;DAC-style codec, weights shared with vocoder<br>
           <span class="sl">out</span> &nbsp;<b>[T, 8]</b> tokens → rearranged into delay pattern<br>
           <span class="sl">key fact</span> &nbsp;deterministic per input → <b>cacheable</b>
@@ -803,10 +805,10 @@ footer.site .sig{font-family:var(--mono);font-size:11px;letter-spacing:.15em;tex
     <div class="dive-head"><span class="sno">B</span><h3>AR Engine <span class="en">— CUDA graphs, radix cache, paged attention</span></h3></div>
     <div class="dive-meta">Qwen3-4B backbone · fused 8-codebook head · 400–800 steps per 10s of speech</div>
     <div class="dive-grid">
-      <div class="dive-what">
+      <div class="dive-what"><div class="dw-text">
         <p>The heart of the system. Each decode step: backbone forward → fused projection to eight codebook heads (<code>[B, 8, V]</code>) → sample eight tokens → advance the delay-pattern state machine → report to the CPU.</p>
         <p>At 400–800 steps per request the enemy is not FLOPs but <b>per-step fixed cost</b>: dozens of tiny kernel launches and device-to-host syncs. At ~0.1ms of overhead per step, that's <b>~80ms of pure waste per request</b>.</p>
-        <div class="spec">
+        </div><div class="spec">
           <span class="sl">per-step</span> &nbsp;forward · 8-head projection · sample · D2H<br>
           <span class="sl">state machine</span> &nbsp;delay → active → wind-down → finished<br>
           <span class="sl">enemy</span> &nbsp;launch + sync overhead × <b>~600 steps</b>
@@ -872,11 +874,11 @@ footer.site .sig{font-family:var(--mono);font-size:11px;letter-spacing:.15em;tex
     <div class="dive-head"><span class="sno">C</span><h3>Vocoder <span class="en">— streaming without the clicks</span></h3></div>
     <div class="dive-meta">DAC decoder · ~10ms per call · batched decode + windowed streaming</div>
     <div class="dive-grid">
-      <div class="dive-what">
+      <div class="dive-what"><div class="dw-text">
         <p><b>Problem one — queueing.</b> Every AR loop converges on this stage. Under 16-way concurrency, finished requests decode serially: 16 × 15ms leaves the last one waiting 240ms. Fixed by batching inside a 2ms collection window.</p>
         <p><b>Problem two — streaming.</b> Audio cannot be chunked like LLM text: the codec's convolutions carry <b>state across time</b> (independent chunks click at every seam), and mid-stream the delay pattern's trailing rows are <b>incomplete</b> (decoding them injects noise).</p>
         <p>The window protocol below solves both — watch it run.</p>
-        <div class="spec">
+        </div><div class="spec">
           <span class="sl">stride</span> &nbsp;<b>75 frames</b> — accumulate, then decode<br>
           <span class="sl">overlap</span> &nbsp;<b>8 frames</b> — re-decode boundary + crossfade<br>
           <span class="sl">hold-back</span> &nbsp;<b>4 frames</b> — incomplete tail rows wait<br>
