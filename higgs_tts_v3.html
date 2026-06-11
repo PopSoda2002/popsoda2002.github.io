@@ -958,12 +958,10 @@ footer.site .sig{font-family:var(--mono);font-size:11px;letter-spacing:.15em;tex
         <div class="metric-grid">
           <div class="metric">
             <h6>NON-STREAMING</h6>
-            <div class="mv"><span class="lbl">first audio&nbsp;&nbsp;</span><b id="nsFirst">—</b><br><span class="lbl">complete&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span><b id="nsTotal">—</b></div>
             <audio id="nsPlayer" controls style="display:none"></audio>
           </div>
           <div class="metric">
             <h6>STREAMING (24kHz PCM)</h6>
-            <div class="mv"><span class="lbl">first audio&nbsp;&nbsp;</span><b id="stFirst">—</b><br><span class="lbl">complete&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span><b id="stTotal">—</b></div>
             <div class="rec-meter" id="playMeter" style="margin-top:12px"></div>
           </div>
         </div>
@@ -1420,20 +1418,16 @@ tlMake('tlRace',{period:8,lanes:[
   $('genNon').addEventListener('click',async()=>{
     if(!guard())return;
     const btn=$('genNon');btn.disabled=true;
-    $('nsFirst').textContent='…';$('nsTotal').textContent='…';
     say('Non-streaming: waiting for the complete MP3…');
-    const t0=performance.now();
     try{
       const r=await fetch(API_URL,{method:'POST',
         headers:{'Authorization':'Bearer '+keyEl.value.trim(),'Content-Type':'application/json'},
         body:JSON.stringify(buildBody({response_format:'mp3'}))});
       if(!r.ok)throw new Error('HTTP '+r.status+' — '+(await r.text()).slice(0,200));
       const blob=await r.blob();
-      const total=performance.now()-t0;
-      $('nsTotal').textContent=fmt(total);$('nsFirst').textContent=fmt(total)+' (= complete)';
       const p=$('nsPlayer');p.src=URL.createObjectURL(blob);p.style.display='block';p.play();
-      say('Non-streaming done in <b>'+fmt(total)+'</b> — nothing was playable before that.','ok');
-    }catch(e){say('Non-streaming failed: '+e.message,'err');$('nsFirst').textContent='—';$('nsTotal').textContent='—'}
+      say('Non-streaming complete — playing.','ok');
+    }catch(e){say('Non-streaming failed: '+e.message,'err')}
     btn.disabled=false;
   });
 
@@ -1444,9 +1438,7 @@ tlMake('tlRace',{period:8,lanes:[
   $('genStr').addEventListener('click',async()=>{
     if(!guard())return;
     const btn=$('genStr');btn.disabled=true;$('stopStr').style.display='inline-flex';stopFlag=false;
-    $('stFirst').textContent='…';$('stTotal').textContent='…';
     say('Streaming: PCM chunks play as they arrive…');
-    const t0=performance.now();let firstAt=null;
     try{
       const r=await fetch(API_URL,{method:'POST',
         headers:{'Authorization':'Bearer '+keyEl.value.trim(),'Content-Type':'application/json'},
@@ -1474,16 +1466,13 @@ tlMake('tlRace',{period:8,lanes:[
         const src=playCtx.createBufferSource();src.buffer=ab;src.connect(an);
         if(nextTime<playCtx.currentTime)nextTime=playCtx.currentTime+0.02;
         src.start(nextTime);nextTime+=ab.duration;
-        if(firstAt===null){firstAt=performance.now()-t0;$('stFirst').textContent=fmt(firstAt)}
       }
       if(stopFlag)reader.cancel().catch(()=>{});
-      const total=performance.now()-t0;
-      $('stTotal').textContent=fmt(total);
       const drain=Math.max(0,(nextTime-playCtx.currentTime)*1000)+200;
       setTimeout(()=>{cancelAnimationFrame(visRAF);if(playCtx)playCtx.close();playCtx=null;
         for(const b of bars)b.style.height='4px'},drain);
-      say(stopFlag?'Streaming stopped.':('Streaming: first audio at <b>'+fmt(firstAt||total)+'</b>, fully received in <b>'+fmt(total)+'</b>.'),'ok');
-    }catch(e){say('Streaming failed: '+e.message,'err');$('stFirst').textContent='—';$('stTotal').textContent='—';if(playCtx){playCtx.close();playCtx=null}}
+      say(stopFlag?'Streaming stopped.':'Streaming complete.','ok');
+    }catch(e){say('Streaming failed: '+e.message,'err');if(playCtx){playCtx.close();playCtx=null}}
     btn.disabled=false;$('stopStr').style.display='none';
   });
 })();
