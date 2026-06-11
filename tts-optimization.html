@@ -4,70 +4,68 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>The Microsecond War — Optimizing Higgs Audio v3 TTS Inference</title>
-<meta name="description" content="How Higgs Audio v3 TTS inference was optimized on SGLang-Omni: CUDA graphs, delay-pattern state machines, windowed streaming vocoding, and a single H100 pushing 61.8 seconds of audio per second.">
+<meta name="description" content="TTS inference is not LLM inference: how Higgs Audio v3 was served on SGLang-Omni with a multi-stage async pipeline, CUDA graphs, radix caching, and windowed streaming vocoding — plus a live voice-cloning demo.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=ZCOOL+QingKe+HuangYou&family=Noto+Sans+SC:wght@300;400;500;700&family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,600;1,400&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Marcellus&family=Plus+Jakarta+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
 :root{
-  --ink:#07090d;
-  --ink-2:#0c1016;
-  --ink-3:#121823;
-  --line:#1e2734;
-  --line-bright:#2c3a4e;
-  --paper:#e8e3d8;
-  --paper-dim:#9aa3ad;
-  --paper-faint:#5d6671;
-  --amber:#ffb454;
-  --amber-deep:#e08c1a;
-  --teal:#3ddbc9;
-  --teal-deep:#1a9e90;
+  --ink:#0E1214;          /* boson.ai page base */
+  --ink-2:#181818;
+  --ink-3:#191D1F;
+  --panel:#1F252D;
+  --line:#252525;
+  --line-2:#2a3344;
+  --paper:#ffffff;
+  --paper-soft:#D6D3D1;
+  --paper-dim:#9aa3b2;
+  --paper-faint:#888888;
+  --green:#07C400;
+  --green-soft:#C7FFC5;
+  --blue:#60A5FA;
+  --blue-soft:#AFEAFA;
+  --blue-deep:#007EA4;
   --red:#ff6b6b;
-  --display:'ZCOOL QingKe HuangYou',sans-serif;
-  --body:'Noto Sans SC',sans-serif;
+  --display:'Marcellus',serif;
+  --body:'Plus Jakarta Sans',sans-serif;
   --mono:'IBM Plex Mono',monospace;
 }
 *{margin:0;padding:0;box-sizing:border-box}
-::selection{background:var(--amber);color:var(--ink)}
+::selection{background:var(--green);color:var(--ink)}
 html{scroll-behavior:smooth}
 body{
   background:var(--ink);
-  color:var(--paper);
+  color:var(--paper-soft);
   font-family:var(--body);
   font-weight:300;
   line-height:1.8;
   overflow-x:hidden;
 }
 body::after{
-  content:"";position:fixed;inset:0;pointer-events:none;z-index:999;opacity:.05;
+  content:"";position:fixed;inset:0;pointer-events:none;z-index:999;opacity:.04;
   background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
 }
-body::before{
-  content:"";position:fixed;inset:0;pointer-events:none;z-index:998;opacity:.4;
-  background:repeating-linear-gradient(to bottom,transparent 0 3px,rgba(0,0,0,.18) 3px 4px);
-}
-a{color:var(--teal);text-decoration:none;border-bottom:1px dotted var(--teal-deep)}
-a:hover{color:var(--amber);border-color:var(--amber-deep)}
+a{color:var(--blue);text-decoration:none;border-bottom:1px dotted var(--blue-deep)}
+a:hover{color:var(--green-soft);border-color:var(--green)}
 .mono{font-family:var(--mono)}
-.amber{color:var(--amber)}
-.teal{color:var(--teal)}
+h1,h2,h3{color:var(--paper)}
 
 /* ============ NAV ============ */
 nav{
   position:fixed;top:0;left:0;right:0;z-index:100;
   display:flex;align-items:center;justify-content:space-between;
   padding:14px 32px;
-  background:linear-gradient(to bottom,rgba(7,9,13,.92),rgba(7,9,13,.75));
+  background:linear-gradient(to bottom,rgba(14,18,20,.94),rgba(14,18,20,.78));
   backdrop-filter:blur(12px);
   border-bottom:1px solid var(--line);
 }
-nav .brand{font-family:var(--mono);font-size:12px;letter-spacing:.18em;color:var(--paper-dim)}
-nav .brand b{color:var(--amber);font-weight:600}
-nav .links{display:flex;gap:22px;font-size:13px}
-nav .links a{color:var(--paper-dim);border:none;letter-spacing:.06em;transition:color .2s}
-nav .links a:hover{color:var(--amber)}
-nav .links .num{font-family:var(--mono);font-size:10px;color:var(--teal-deep);margin-right:4px}
-@media(max-width:880px){nav .links{display:none}}
+nav .brand{font-family:var(--mono);font-size:12px;letter-spacing:.18em;color:var(--paper-faint)}
+nav .brand b{color:var(--green);font-weight:600}
+nav .links{display:flex;gap:20px;font-size:13px}
+nav .links a{color:var(--paper-faint);border:none;letter-spacing:.04em;transition:color .2s}
+nav .links a:hover{color:var(--green-soft)}
+nav .links .num{font-family:var(--mono);font-size:10px;color:var(--blue);margin-right:4px}
+@media(max-width:1000px){nav .links{display:none}}
 
 /* ============ HERO ============ */
 .hero{
@@ -75,25 +73,25 @@ nav .links .num{font-family:var(--mono);font-size:10px;color:var(--teal-deep);ma
   display:flex;flex-direction:column;justify-content:center;
   padding:120px 7vw 60px;
   background:
-    radial-gradient(ellipse 80% 50% at 70% 20%,rgba(61,219,201,.06),transparent 60%),
-    radial-gradient(ellipse 60% 40% at 20% 80%,rgba(255,180,84,.07),transparent 60%);
+    radial-gradient(ellipse 80% 50% at 72% 18%,rgba(96,165,250,.07),transparent 60%),
+    radial-gradient(ellipse 60% 40% at 18% 82%,rgba(7,196,0,.06),transparent 60%);
 }
 .hero .kicker{
   font-family:var(--mono);font-size:12px;letter-spacing:.35em;
-  color:var(--teal);text-transform:uppercase;margin-bottom:28px;
+  color:var(--green);text-transform:uppercase;margin-bottom:28px;
   display:flex;align-items:center;gap:14px;
   animation:fadeUp .8s .1s both;
 }
-.hero .kicker::before{content:"";width:48px;height:1px;background:var(--teal-deep)}
+.hero .kicker::before{content:"";width:48px;height:1px;background:var(--green)}
 .hero h1{
   font-family:var(--display);font-weight:400;
-  font-size:clamp(48px,9.5vw,128px);
-  line-height:1.04;letter-spacing:.02em;
+  font-size:clamp(44px,8.2vw,108px);
+  line-height:1.06;letter-spacing:.01em;
   animation:fadeUp .8s .25s both;
 }
-.hero h1 .l2{display:block;color:var(--amber);}
+.hero h1 .l2{display:block;color:var(--green-soft)}
 .hero .sub{
-  margin-top:34px;max-width:680px;font-size:16px;color:var(--paper-dim);
+  margin-top:34px;max-width:700px;font-size:16px;color:var(--paper-dim);
   animation:fadeUp .8s .4s both;
 }
 .hero .sub b{color:var(--paper);font-weight:500}
@@ -109,284 +107,317 @@ nav .links .num{font-family:var(--mono);font-size:10px;color:var(--teal-deep);ma
 .hero-stats .stat:last-child{border-right:none}
 .hero-stats .v{font-family:var(--mono);font-size:clamp(28px,4vw,44px);font-weight:600;color:var(--paper)}
 .hero-stats .v em{font-style:normal;font-size:.45em;color:var(--paper-faint);margin-left:4px}
-.hero-stats .k{font-size:12px;color:var(--paper-faint);letter-spacing:.12em;margin-top:2px}
-.hero-stats .stat:nth-child(1) .v{color:var(--amber)}
-.hero-stats .stat:nth-child(2) .v{color:var(--teal)}
-
+.hero-stats .k{font-size:11.5px;color:var(--paper-faint);letter-spacing:.12em;margin-top:2px}
+.hero-stats .stat:nth-child(1) .v{color:var(--green)}
+.hero-stats .stat:nth-child(2) .v{color:var(--blue)}
 .wave-strip{
   position:absolute;left:0;right:0;bottom:0;height:120px;overflow:hidden;
-  opacity:.9;pointer-events:none;
+  opacity:.85;pointer-events:none;
   -webkit-mask-image:linear-gradient(to right,transparent,#000 12%,#000 88%,transparent);
   mask-image:linear-gradient(to right,transparent,#000 12%,#000 88%,transparent);
 }
-.wave-strip .bars{
-  position:absolute;inset:0;display:flex;align-items:center;gap:5px;padding:0 4vw;
-}
+.wave-strip .bars{position:absolute;inset:0;display:flex;align-items:center;gap:5px;padding:0 4vw}
 .wave-strip .bars i{
-  flex:1;background:linear-gradient(to top,var(--teal-deep),var(--teal));
-  min-width:2px;border-radius:1px;opacity:.5;
+  flex:1;background:linear-gradient(to top,var(--blue-deep),var(--blue));
+  min-width:2px;border-radius:1px;opacity:.45;
   animation:pulse 1.6s ease-in-out infinite;
 }
+.wave-strip .bars i:nth-child(3n){background:linear-gradient(to top,#0a7a02,var(--green))}
 @keyframes pulse{0%,100%{transform:scaleY(.35)}50%{transform:scaleY(1)}}
 @keyframes fadeUp{from{opacity:0;transform:translateY(28px)}to{opacity:1;transform:none}}
 
 /* ============ SHARED ============ */
-section{padding:110px 7vw;position:relative}
+section{padding:108px 7vw;position:relative}
 .sec-head{display:flex;align-items:baseline;gap:22px;margin-bottom:18px}
 .sec-head .no{
-  font-family:var(--mono);font-size:13px;color:var(--teal);
-  border:1px solid var(--teal-deep);padding:4px 10px;letter-spacing:.1em;
+  font-family:var(--mono);font-size:13px;color:var(--green);
+  border:1px solid rgba(7,196,0,.45);padding:4px 10px;letter-spacing:.1em;
 }
 .sec-head h2{
   font-family:var(--display);font-weight:400;
-  font-size:clamp(32px,4.6vw,54px);letter-spacing:.03em;
+  font-size:clamp(30px,4.4vw,52px);letter-spacing:.01em;
 }
-.sec-lede{max-width:720px;color:var(--paper-dim);font-size:15.5px;margin-bottom:56px}
-.sec-lede b{color:var(--amber);font-weight:500}
+.sec-lede{max-width:740px;color:var(--paper-dim);font-size:15.5px;margin-bottom:54px}
+.sec-lede b{color:var(--green-soft);font-weight:500}
 .reveal{opacity:0;transform:translateY(36px);transition:opacity .7s ease,transform .7s ease}
 .reveal.in{opacity:1;transform:none}
 code{
-  font-family:var(--mono);font-size:.86em;color:var(--teal);
-  background:var(--ink);border:1px solid var(--line);padding:1px 7px;border-radius:2px;
+  font-family:var(--mono);font-size:.86em;color:var(--blue-soft);
+  background:var(--ink-3);border:1px solid var(--line);padding:1px 7px;border-radius:3px;
   white-space:nowrap;
 }
 .pr{
   font-family:var(--mono);font-size:10px;letter-spacing:.06em;
-  color:var(--paper-faint);border:1px solid var(--line);padding:2px 8px;border-radius:2px;
+  color:var(--paper-faint);border:1px solid var(--line);padding:2px 8px;border-radius:3px;
   white-space:nowrap;transition:color .2s,border-color .2s;
 }
 a.pr{border-bottom:1px solid var(--line)}
-a.pr:hover{color:var(--teal);border-color:var(--teal-deep)}
-.pr-row{display:flex;flex-wrap:wrap;gap:8px;margin-top:16px}
+a.pr:hover{color:var(--green-soft);border-color:var(--green)}
+.pr-row{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
+.note{font-size:12px;color:var(--paper-faint);font-family:var(--mono)}
 
-/* ============ PIPELINE ============ */
-#pipeline{background:var(--ink-2);border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
-.pipe{
-  display:grid;grid-template-columns:repeat(4,1fr);gap:0;
-  border:1px solid var(--line);background:var(--ink);
+/* ============ 01 VS ============ */
+#vs{background:var(--ink-3);border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+.vs-grid{display:grid;grid-template-columns:1fr 1fr;gap:0;border:1px solid var(--line);background:var(--ink)}
+@media(max-width:880px){.vs-grid{grid-template-columns:1fr}}
+.vs-col{padding:40px 38px}
+.vs-col.llm{border-right:1px solid var(--line)}
+@media(max-width:880px){.vs-col.llm{border-right:none;border-bottom:1px solid var(--line)}}
+.vs-col .vtag{font-family:var(--mono);font-size:10px;letter-spacing:.24em;padding:4px 10px;display:inline-block;margin-bottom:20px}
+.vs-col.llm .vtag{color:var(--blue);border:1px solid rgba(96,165,250,.4)}
+.vs-col.tts .vtag{color:var(--green);border:1px solid rgba(7,196,0,.45)}
+.vs-col h3{font-family:var(--display);font-size:26px;font-weight:400;margin-bottom:6px}
+.vs-col .vsub{font-family:var(--mono);font-size:11px;color:var(--paper-faint);letter-spacing:.1em;margin-bottom:24px}
+.vs-col ul{list-style:none}
+.vs-col li{
+  padding:14px 0 14px 26px;border-top:1px dashed var(--line);
+  font-size:13.5px;color:var(--paper-dim);position:relative;
 }
-.pipe .node{
-  padding:34px 26px 30px;border-right:1px solid var(--line);position:relative;
-  transition:background .3s;
+.vs-col li::before{content:"›";position:absolute;left:4px;font-family:var(--mono)}
+.vs-col.llm li::before{color:var(--blue)}
+.vs-col.tts li::before{color:var(--green)}
+.vs-col li b{color:var(--paper);font-weight:500}
+.vs-verdict{
+  margin-top:28px;max-width:980px;padding:22px 28px;
+  background:linear-gradient(to right,rgba(7,196,0,.06),transparent);
+  border-left:3px solid var(--green);font-size:14px;color:var(--paper-dim);
 }
+.vs-verdict b{color:var(--green-soft);font-weight:500}
+
+/* ============ 02 ASYNC ============ */
+.flow{display:grid;grid-template-columns:1fr;gap:26px;max-width:980px}
+.flow-row{border:1px solid var(--line);background:var(--ink-3);padding:26px 30px}
+.flow-row .f-title{font-family:var(--mono);font-size:11px;letter-spacing:.22em;margin-bottom:16px}
+.flow-row.sync .f-title{color:var(--red)}
+.flow-row.async .f-title{color:var(--green)}
+.lane{display:flex;gap:4px;align-items:center;margin-bottom:8px;font-family:var(--mono);font-size:10px}
+.lane .ln{width:84px;color:var(--paper-faint);flex-shrink:0}
+.lane .seg{height:20px;border-radius:2px;position:relative}
+.seg.enc{background:rgba(96,165,250,.75)}
+.seg.ar{background:rgba(7,196,0,.55)}
+.seg.voc{background:rgba(175,234,250,.8)}
+.seg.idle{background:var(--panel);border:1px dashed var(--line-2)}
+.flow-note{font-size:13px;color:var(--paper-dim);margin-top:14px}
+.flow-note b{color:var(--paper);font-weight:500}
+.legend-row{display:flex;gap:22px;margin-top:18px;font-family:var(--mono);font-size:10.5px;color:var(--paper-faint)}
+.legend-row i{display:inline-block;width:11px;height:11px;margin-right:7px;vertical-align:-1px;border-radius:2px}
+.benefits{display:grid;grid-template-columns:repeat(3,1fr);gap:22px;margin-top:46px}
+@media(max-width:900px){.benefits{grid-template-columns:1fr}}
+.benefit{border:1px solid var(--line);background:var(--ink-3);padding:28px 26px;transition:border-color .3s,transform .3s}
+.benefit:hover{border-color:var(--green);transform:translateY(-3px)}
+.benefit h4{font-family:var(--display);font-size:20px;font-weight:400;color:var(--paper);margin-bottom:10px}
+.benefit p{font-size:13px;color:var(--paper-dim)}
+.benefit .bi{font-family:var(--mono);font-size:10px;color:var(--blue);letter-spacing:.2em;margin-bottom:14px}
+
+/* ============ 03 STAGES OVERVIEW ============ */
+#stages{background:var(--ink-3);border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+.pipe{display:grid;grid-template-columns:repeat(4,1fr);gap:0;border:1px solid var(--line);background:var(--ink)}
+.pipe .node{padding:32px 26px 28px;border-right:1px solid var(--line);position:relative;transition:background .3s}
 .pipe .node:last-child{border-right:none}
-.pipe .node:hover{background:var(--ink-3)}
+.pipe .node:hover{background:var(--panel)}
 .pipe .node::after{
-  content:"▸";position:absolute;right:-9px;top:50%;transform:translateY(-50%);
-  color:var(--amber);font-size:15px;z-index:2;background:var(--ink);padding:2px 0;
+  content:"▸";position:absolute;right:-9px;top:46px;
+  color:var(--green);font-size:15px;z-index:2;background:var(--ink);padding:2px 0;
 }
 .pipe .node:last-child::after{display:none}
 .pipe .tag{font-family:var(--mono);font-size:10px;letter-spacing:.2em;padding:3px 8px;display:inline-block;margin-bottom:16px}
-.tag.cpu{color:var(--paper-dim);border:1px solid var(--line-bright)}
-.tag.gpu{color:var(--teal);border:1px solid var(--teal-deep)}
-.pipe h3{font-family:var(--display);font-weight:400;font-size:23px;letter-spacing:.04em;margin-bottom:10px}
-.pipe p{font-size:13px;color:var(--paper-dim);line-height:1.75}
-.pipe .mono-note{font-family:var(--mono);font-size:11px;color:var(--amber);margin-top:14px;display:block}
-@media(max-width:980px){.pipe{grid-template-columns:1fr 1fr}.pipe .node:nth-child(2)::after{display:none}}
-@media(max-width:560px){.pipe{grid-template-columns:1fr}.pipe .node::after{display:none}.pipe .node{border-right:none;border-bottom:1px solid var(--line)}}
-
-.delay-wrap{margin-top:72px;display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,.9fr);gap:60px;align-items:center}
+.tag.cpu{color:var(--paper-faint);border:1px solid var(--line-2)}
+.tag.gpu{color:var(--blue);border:1px solid rgba(96,165,250,.4)}
+.pipe h3{font-family:var(--display);font-weight:400;font-size:21px;margin-bottom:10px}
+.pipe p{font-size:12.5px;color:var(--paper-dim);line-height:1.7}
+.pipe .mono-note{font-family:var(--mono);font-size:10.5px;color:var(--green);margin-top:12px;display:block}
+.pipe .opts{margin-top:18px;padding-top:14px;border-top:1px dashed var(--line)}
+.pipe .opts span{
+  display:inline-block;font-family:var(--mono);font-size:9.5px;letter-spacing:.06em;
+  color:var(--green-soft);background:rgba(7,196,0,.08);border:1px solid rgba(7,196,0,.25);
+  padding:2px 7px;border-radius:3px;margin:0 5px 6px 0;
+}
+@media(max-width:1060px){.pipe{grid-template-columns:1fr 1fr}.pipe .node:nth-child(2)::after{display:none}}
+@media(max-width:600px){.pipe{grid-template-columns:1fr}.pipe .node::after{display:none}.pipe .node{border-right:none;border-bottom:1px solid var(--line)}}
+.delay-wrap{margin-top:70px;display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,.9fr);gap:60px;align-items:center}
 @media(max-width:900px){.delay-wrap{grid-template-columns:1fr}}
-.delay-grid{
-  display:grid;grid-template-columns:auto repeat(12,1fr);gap:4px;
-  font-family:var(--mono);font-size:10px;
-}
+.delay-grid{display:grid;grid-template-columns:auto repeat(12,1fr);gap:4px;font-family:var(--mono);font-size:10px}
 .delay-grid .rl{color:var(--paper-faint);align-self:center;padding-right:8px;white-space:nowrap}
-.delay-grid .cell{aspect-ratio:1;background:var(--ink-3);border:1px solid var(--line);position:relative}
-.delay-grid .cell.on{
-  background:linear-gradient(135deg,var(--teal-deep),var(--teal));
-  border-color:var(--teal);box-shadow:0 0 10px rgba(61,219,201,.25);
-}
-.delay-grid .cell.first{
-  background:linear-gradient(135deg,var(--amber-deep),var(--amber));
-  border-color:var(--amber);box-shadow:0 0 10px rgba(255,180,84,.3);
-}
+.delay-grid .cell{aspect-ratio:1;background:var(--panel);border:1px solid var(--line)}
+.delay-grid .cell.on{background:linear-gradient(135deg,var(--blue-deep),var(--blue));border-color:var(--blue);box-shadow:0 0 10px rgba(96,165,250,.25)}
+.delay-grid .cell.first{background:linear-gradient(135deg,#0a8a02,var(--green));border-color:var(--green);box-shadow:0 0 10px rgba(7,196,0,.3)}
 .in .delay-grid .cell.on,.in .delay-grid .cell.first{animation:cellIn .4s both}
 @keyframes cellIn{from{opacity:0;transform:scale(.5)}to{opacity:1;transform:none}}
 .delay-grid .ch{color:var(--paper-faint);text-align:center;padding-bottom:4px}
-.delay-side h3{font-family:var(--display);font-weight:400;font-size:29px;margin-bottom:16px;letter-spacing:.03em}
+.delay-side h3{font-family:var(--display);font-weight:400;font-size:27px;margin-bottom:16px}
 .delay-side p{font-size:14px;color:var(--paper-dim);margin-bottom:14px}
 .delay-side p b{color:var(--paper);font-weight:500}
 .delay-side .legend{display:flex;gap:24px;margin-top:20px;font-family:var(--mono);font-size:11px;color:var(--paper-dim)}
 .delay-side .legend i{display:inline-block;width:11px;height:11px;margin-right:7px;vertical-align:-1px}
-.delay-side .legend .a i{background:var(--amber)}
-.delay-side .legend .b i{background:var(--teal)}
-.delay-side .legend .c i{background:var(--ink-3);border:1px solid var(--line)}
+.delay-side .legend .a i{background:var(--green)}
+.delay-side .legend .b i{background:var(--blue)}
+.delay-side .legend .c i{background:var(--panel);border:1px solid var(--line)}
 
-/* ============ BOTTLENECKS ============ */
-.bn-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:28px}
-@media(max-width:900px){.bn-grid{grid-template-columns:1fr}}
-.bn{
-  background:var(--ink-2);border:1px solid var(--line);padding:38px 32px;
-  position:relative;overflow:hidden;transition:border-color .3s,transform .3s;
+/* ============ DEEP DIVES ============ */
+.dive{margin-top:84px;padding-top:64px;border-top:1px solid var(--line)}
+.dive:first-of-type{margin-top:0;padding-top:0;border-top:none}
+.dive-head{display:flex;align-items:baseline;gap:20px;flex-wrap:wrap;margin-bottom:8px}
+.dive-head .sno{
+  font-family:var(--display);font-size:clamp(38px,4.6vw,58px);line-height:1;
+  color:transparent;-webkit-text-stroke:1px var(--green);opacity:.85;
 }
-.bn:hover{border-color:var(--amber-deep);transform:translateY(-4px)}
-.bn::before{
-  content:attr(data-no);position:absolute;top:-26px;right:2px;
-  font-family:var(--display);font-size:110px;color:var(--ink-3);line-height:1;z-index:0;
-}
-.bn>*{position:relative;z-index:1}
-.bn .b-tag{font-family:var(--mono);font-size:11px;letter-spacing:.22em;color:var(--red);margin-bottom:18px}
-.bn h3{font-family:var(--display);font-weight:400;font-size:25px;letter-spacing:.03em;margin-bottom:14px}
-.bn p{font-size:13.5px;color:var(--paper-dim)}
-.bn .fig{
-  margin-top:24px;padding-top:20px;border-top:1px dashed var(--line);
-  font-family:var(--mono);font-size:12px;color:var(--paper-faint);
-}
-.bn .fig b{display:block;font-size:26px;font-weight:600;color:var(--amber);margin-bottom:2px}
-
-/* ============ STAGES ============ */
-#stages{background:var(--ink-2);border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
-.stage{
-  margin-top:84px;padding-top:64px;border-top:1px solid var(--line);
-}
-.stage:first-of-type{margin-top:0;padding-top:0;border-top:none}
-.stage-head{display:flex;align-items:baseline;gap:20px;flex-wrap:wrap;margin-bottom:8px}
-.stage-head .sno{
-  font-family:var(--display);font-size:clamp(40px,5vw,64px);line-height:1;
-  color:transparent;-webkit-text-stroke:1.5px var(--amber-deep);
-}
-.stage-head h3{
-  font-family:var(--display);font-weight:400;
-  font-size:clamp(28px,3.8vw,44px);letter-spacing:.03em;
-}
-.stage-head h3 .en{color:var(--amber)}
-.stage-meta{font-family:var(--mono);font-size:11px;letter-spacing:.2em;color:var(--teal);margin-bottom:24px;text-transform:uppercase}
-.stage-grid{display:grid;grid-template-columns:minmax(0,.92fr) minmax(0,1.08fr);gap:56px;align-items:start}
-@media(max-width:980px){.stage-grid{grid-template-columns:1fr;gap:36px}}
-.stage-what{font-size:14.5px;color:var(--paper-dim)}
-.stage-what p{margin-bottom:14px}
-.stage-what b{color:var(--paper);font-weight:500}
-.stage-what .spec{
-  margin-top:22px;border:1px dashed var(--line-bright);padding:18px 22px;
+.dive-head h3{font-family:var(--display);font-weight:400;font-size:clamp(26px,3.4vw,40px)}
+.dive-head h3 .en{color:var(--green-soft)}
+.dive-meta{font-family:var(--mono);font-size:11px;letter-spacing:.2em;color:var(--blue);margin-bottom:24px;text-transform:uppercase}
+.dive-grid{display:grid;grid-template-columns:minmax(0,.92fr) minmax(0,1.08fr);gap:54px;align-items:start}
+@media(max-width:980px){.dive-grid{grid-template-columns:1fr;gap:36px}}
+.dive-what{font-size:14.5px;color:var(--paper-dim)}
+.dive-what p{margin-bottom:14px}
+.dive-what b{color:var(--paper);font-weight:500}
+.spec{
+  margin-top:22px;border:1px dashed var(--line-2);padding:18px 22px;
   font-family:var(--mono);font-size:12px;color:var(--paper-dim);line-height:2;
 }
-.stage-what .spec b{color:var(--teal);font-weight:500}
-.stage-what .spec .sl{color:var(--paper-faint)}
+.spec b{color:var(--blue-soft);font-weight:500}
+.spec .sl{color:var(--paper-faint)}
 .moves{display:grid;grid-template-columns:1fr;gap:14px}
 .move{
   background:var(--ink);border:1px solid var(--line);padding:22px 24px;
-  border-left:3px solid var(--teal-deep);transition:border-color .3s;
+  border-left:3px solid var(--blue-deep);transition:border-color .3s;
 }
-.move:hover{border-left-color:var(--amber)}
+.move:hover{border-left-color:var(--green)}
 .move .m-name{font-weight:500;font-size:15px;color:var(--paper);margin-bottom:8px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-.move .m-name .mk{font-family:var(--mono);font-size:10px;color:var(--amber);border:1px solid var(--amber-deep);padding:2px 7px;letter-spacing:.1em}
-.move p{font-size:13px;color:var(--paper-dim);line-height:1.78}
+.move .m-name .mk{font-family:var(--mono);font-size:10px;color:var(--green);border:1px solid rgba(7,196,0,.45);padding:2px 7px;letter-spacing:.1em}
+.move p{font-size:13px;color:var(--paper-dim);line-height:1.78;margin-bottom:6px}
+.move p:last-of-type{margin-bottom:0}
 .move p b{color:var(--paper);font-weight:500}
 .move.cut{border-left-color:var(--red)}
-.move.cut .m-name .mk{color:var(--red);border-color:var(--red)}
-.move.open{border-left-color:var(--line-bright);border-style:dashed}
-.move.open .m-name .mk{color:var(--paper-faint);border-color:var(--line-bright)}
+.move.cut .m-name .mk{color:var(--red);border-color:rgba(255,107,107,.5)}
+.move.concept{border-left-color:var(--blue);background:linear-gradient(to right,rgba(96,165,250,.05),var(--ink) 40%)}
+.move.concept .m-name .mk{color:var(--blue);border-color:rgba(96,165,250,.45)}
 .callout{
   margin-top:18px;padding:20px 26px;
-  background:linear-gradient(to right,rgba(255,180,84,.07),transparent);
-  border-left:3px solid var(--amber);font-size:13.5px;color:var(--paper-dim);
+  background:linear-gradient(to right,rgba(7,196,0,.06),transparent);
+  border-left:3px solid var(--green);font-size:13.5px;color:var(--paper-dim);
 }
-.callout b{color:var(--amber);font-weight:500}
-.callout.danger{
-  background:linear-gradient(to right,rgba(255,107,107,.07),transparent);
-  border-left-color:var(--red);
-}
+.callout b{color:var(--green-soft);font-weight:500}
+.callout.danger{background:linear-gradient(to right,rgba(255,107,107,.07),transparent);border-left-color:var(--red)}
 .callout.danger b{color:var(--red)}
-
 .stride{display:flex;gap:8px;margin-top:22px;align-items:flex-end;font-family:var(--mono);font-size:10px}
 .stride .blk{text-align:center;color:var(--paper-faint)}
 .stride .bar{height:46px;margin-bottom:8px;border:1px solid var(--line)}
-.stride .stride-b .bar{background:repeating-linear-gradient(45deg,var(--teal-deep) 0 6px,rgba(26,158,144,.35) 6px 12px);border-color:var(--teal-deep)}
-.stride .ovl .bar{background:var(--amber-deep);border-color:var(--amber)}
-.stride .hold .bar{background:var(--ink-3);border-style:dashed}
+.stride .stride-b .bar{background:repeating-linear-gradient(45deg,rgba(96,165,250,.7) 0 6px,rgba(96,165,250,.3) 6px 12px);border-color:var(--blue)}
+.stride .ovl .bar{background:rgba(7,196,0,.6);border-color:var(--green)}
+.stride .hold .bar{background:var(--panel);border-style:dashed}
 .stride .stride-b{flex:6}.stride .ovl{flex:1.4}.stride .hold{flex:1}
+/* streaming vs non-streaming compare */
+.sv-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:8px}
+@media(max-width:760px){.sv-grid{grid-template-columns:1fr}}
+.sv{border:1px solid var(--line);background:var(--ink);padding:22px 24px}
+.sv h5{font-family:var(--mono);font-size:11px;letter-spacing:.2em;margin-bottom:14px}
+.sv.non h5{color:var(--paper-faint)}
+.sv.str h5{color:var(--green)}
+.sv .tline{display:flex;align-items:center;gap:0;height:18px;margin-bottom:10px;font-family:var(--mono);font-size:9px}
+.sv .tseg{height:100%;display:flex;align-items:center;justify-content:center;color:rgba(255,255,255,.85)}
+.sv p{font-size:12.5px;color:var(--paper-dim)}
+.sv p b{color:var(--paper);font-weight:500}
 
-/* ============ ROADMAP ============ */
-.term{
-  border:1px solid var(--line);background:var(--ink-2);
-  font-family:var(--mono);font-size:13px;
-  max-width:980px;
+/* ============ DEMO ============ */
+#demo{background:linear-gradient(180deg,var(--ink-3),var(--ink));border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+.demo-shell{border:1px solid var(--line-2);background:var(--ink-2);max-width:1020px;box-shadow:0 24px 80px rgba(0,0,0,.45)}
+.demo-bar{
+  display:flex;align-items:center;gap:8px;padding:13px 20px;
+  border-bottom:1px solid var(--line);font-family:var(--mono);font-size:11px;
+  letter-spacing:.12em;color:var(--paper-faint);
 }
-.term .term-bar{
-  display:flex;align-items:center;gap:8px;padding:12px 18px;
-  border-bottom:1px solid var(--line);color:var(--paper-faint);font-size:11px;letter-spacing:.1em;
+.demo-bar i{width:10px;height:10px;border-radius:50%;border:1px solid var(--line-2)}
+.demo-bar i:nth-child(1){background:rgba(255,107,107,.6)}
+.demo-bar i:nth-child(2){background:rgba(255,180,84,.6)}
+.demo-bar i:nth-child(3){background:rgba(7,196,0,.6)}
+.demo-body{padding:34px 36px 38px}
+@media(max-width:640px){.demo-body{padding:24px 18px}}
+.d-row{margin-bottom:26px}
+.d-label{font-family:var(--mono);font-size:10.5px;letter-spacing:.22em;color:var(--paper-faint);margin-bottom:10px;display:flex;justify-content:space-between;align-items:baseline}
+.d-label .hint{letter-spacing:.02em;text-transform:none;color:var(--paper-faint);font-size:10.5px}
+input[type=password],input[type=text],textarea{
+  width:100%;background:var(--ink);border:1px solid var(--line-2);color:var(--paper);
+  font-family:var(--mono);font-size:13px;padding:12px 14px;border-radius:4px;outline:none;
+  transition:border-color .2s;
 }
-.term .term-bar i{width:10px;height:10px;border-radius:50%;background:var(--ink-3);border:1px solid var(--line-bright)}
-.term .term-bar i:nth-child(1){background:rgba(255,107,107,.5)}
-.term .term-bar i:nth-child(2){background:rgba(255,180,84,.5)}
-.term .term-bar i:nth-child(3){background:rgba(61,219,201,.5)}
-.term .term-body{padding:24px 26px 28px;line-height:2.05}
-.term .grp{color:var(--amber);margin-top:18px;letter-spacing:.08em}
-.term .grp:first-child{margin-top:0}
-.term .it{display:flex;gap:12px;align-items:baseline;color:var(--paper-dim)}
-.term .it .bx{color:var(--teal);flex-shrink:0}
-.term .it.todo .bx{color:var(--paper-faint)}
-.term .it.todo{color:var(--paper-faint)}
-.term .it .who{color:var(--paper-faint);font-size:11px}
-.term .it a{border-bottom:none;font-size:12px}
-.term .it.bug .bx{color:var(--red)}
+textarea{font-family:var(--body);font-weight:300;resize:vertical;min-height:88px;line-height:1.7}
+input:focus,textarea:focus{border-color:var(--green)}
+.btn{
+  display:inline-flex;align-items:center;gap:10px;
+  font-family:var(--mono);font-size:12px;letter-spacing:.12em;
+  padding:13px 24px;border-radius:4px;cursor:pointer;border:1px solid var(--line-2);
+  background:var(--panel);color:var(--paper);transition:all .2s;user-select:none;
+}
+.btn:hover{border-color:var(--green);color:var(--green-soft)}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.btn.primary{background:var(--green);border-color:var(--green);color:#06250a;font-weight:600}
+.btn.primary:hover{background:var(--green-soft);color:#06250a}
+.btn.blue{background:rgba(96,165,250,.12);border-color:rgba(96,165,250,.5);color:var(--blue-soft)}
+.btn.blue:hover{border-color:var(--blue);color:#fff}
+.btn.rec.recording{background:rgba(255,107,107,.15);border-color:var(--red);color:var(--red);animation:recPulse 1.2s ease-in-out infinite}
+@keyframes recPulse{0%,100%{box-shadow:0 0 0 0 rgba(255,107,107,.35)}50%{box-shadow:0 0 0 8px rgba(255,107,107,0)}}
+.btn-row{display:flex;gap:14px;flex-wrap:wrap;align-items:center}
+.rec-meter{display:flex;align-items:center;gap:3px;height:34px}
+.rec-meter i{width:3px;background:var(--green);border-radius:1px;height:4px;transition:height .08s}
+.d-status{font-family:var(--mono);font-size:12px;color:var(--paper-dim);min-height:20px;margin-top:14px}
+.d-status .ok{color:var(--green-soft)}
+.d-status .err{color:var(--red)}
+.metric-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:22px}
+@media(max-width:640px){.metric-grid{grid-template-columns:1fr}}
+.metric{border:1px solid var(--line);background:var(--ink);padding:18px 20px;border-radius:4px}
+.metric h6{font-family:var(--mono);font-size:10px;letter-spacing:.2em;color:var(--paper-faint);margin-bottom:10px}
+.metric .mv{font-family:var(--mono);font-size:13px;line-height:2}
+.metric .mv b{color:var(--green-soft);font-weight:600}
+.metric .mv .lbl{color:var(--paper-faint)}
+audio{width:100%;margin-top:10px;height:38px}
+.demo-foot{padding:0 36px 30px;font-size:12px;color:var(--paper-faint);font-family:var(--mono)}
 
 /* ============ BENCH ============ */
 .bench-wrap{display:grid;grid-template-columns:minmax(0,1.05fr) minmax(0,.95fr);gap:64px;align-items:start}
 @media(max-width:980px){.bench-wrap{grid-template-columns:1fr}}
 table{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:13px}
 thead th{
-  text-align:right;font-weight:500;color:var(--teal);font-size:11px;letter-spacing:.1em;
-  padding:12px 14px;border-bottom:1px solid var(--teal-deep);white-space:nowrap;
+  text-align:right;font-weight:500;color:var(--blue);font-size:11px;letter-spacing:.1em;
+  padding:12px 14px;border-bottom:1px solid var(--blue-deep);white-space:nowrap;
 }
 thead th:first-child{text-align:left}
 tbody td{text-align:right;padding:14px;border-bottom:1px solid var(--line);color:var(--paper-dim)}
 tbody td:first-child{text-align:left;color:var(--paper);font-weight:500}
-tbody tr{transition:background .2s}
-tbody tr:hover{background:var(--ink-3)}
-tbody tr:last-child td{color:var(--paper);background:rgba(255,180,84,.05)}
-tbody tr:last-child td:first-child{color:var(--amber)}
+tbody tr:hover{background:var(--panel)}
+tbody tr:last-child td{color:var(--paper);background:rgba(7,196,0,.05)}
+tbody tr:last-child td:first-child{color:var(--green)}
 .tbl-note{font-size:12px;color:var(--paper-faint);margin-top:14px;font-family:var(--mono)}
 .bars-title{font-family:var(--mono);font-size:11px;letter-spacing:.22em;color:var(--paper-faint);margin-bottom:22px}
 .bbar{margin-bottom:20px}
 .bbar .lab{display:flex;justify-content:space-between;font-family:var(--mono);font-size:11px;color:var(--paper-dim);margin-bottom:7px}
-.bbar .lab b{color:var(--teal);font-weight:600}
-.bbar .track{height:22px;background:var(--ink-3);border:1px solid var(--line);position:relative;overflow:hidden}
+.bbar .lab b{color:var(--blue);font-weight:600}
+.bbar .track{height:22px;background:var(--panel);border:1px solid var(--line);position:relative;overflow:hidden}
 .bbar .fill{
   height:100%;width:0;
-  background:linear-gradient(to right,var(--teal-deep),var(--teal));
+  background:linear-gradient(to right,var(--blue-deep),var(--blue));
   transition:width 1.2s cubic-bezier(.22,1,.36,1);position:relative;
 }
 .bbar .fill::after{content:"";position:absolute;right:0;top:0;bottom:0;width:2px;background:#fff;opacity:.7}
-.bbar.hot .fill{background:linear-gradient(to right,var(--amber-deep),var(--amber))}
-.bbar.hot .lab b{color:var(--amber)}
+.bbar.hot .fill{background:linear-gradient(to right,#0a8a02,var(--green))}
+.bbar.hot .lab b{color:var(--green)}
 .rtf-pill{
   display:inline-flex;align-items:baseline;gap:10px;margin-top:34px;
-  border:1px dashed var(--line-bright);padding:16px 24px;font-family:var(--mono);
+  border:1px dashed var(--line-2);padding:16px 24px;font-family:var(--mono);
 }
-.rtf-pill .big{font-size:30px;font-weight:600;color:var(--teal)}
+.rtf-pill .big{font-size:30px;font-weight:600;color:var(--green)}
 .rtf-pill span{font-size:12px;color:var(--paper-faint)}
-.quality{margin-top:56px;max-width:980px}
+.quality{margin-top:56px;max-width:1020px}
 .quality h4{font-family:var(--mono);font-size:11px;letter-spacing:.22em;color:var(--paper-faint);margin-bottom:20px}
 .q-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:18px}
 @media(max-width:900px){.q-grid{grid-template-columns:1fr 1fr}}
-.q-card{border:1px solid var(--line);padding:20px 22px;background:var(--ink-2)}
-.q-card .qv{font-family:var(--mono);font-size:26px;font-weight:600;color:var(--teal)}
+.q-card{border:1px solid var(--line);padding:20px 22px;background:var(--ink-3)}
+.q-card .qv{font-family:var(--mono);font-size:26px;font-weight:600;color:var(--green)}
 .q-card .qk{font-size:12px;color:var(--paper-faint);margin-top:4px;line-height:1.5}
-
-/* ============ LESSONS ============ */
-#lessons{background:var(--ink-2);border-top:1px solid var(--line)}
-.lesson-list{max-width:880px}
-.lesson{
-  display:grid;grid-template-columns:90px 1fr;gap:28px;
-  padding:34px 0;border-bottom:1px solid var(--line);
-}
-.lesson:first-child{border-top:1px solid var(--line)}
-.lesson .ln{
-  font-family:var(--display);font-size:46px;color:transparent;line-height:1;
-  -webkit-text-stroke:1px var(--line-bright);
-}
-.lesson h3{font-family:var(--display);font-weight:400;font-size:24px;letter-spacing:.04em;margin-bottom:8px}
-.lesson p{font-size:14px;color:var(--paper-dim);max-width:660px}
-.lesson p b{color:var(--amber);font-weight:500}
-@media(max-width:600px){.lesson{grid-template-columns:1fr;gap:8px}}
 blockquote{
-  margin:80px auto 0;max-width:820px;text-align:center;
-  font-family:var(--display);font-weight:400;font-size:clamp(20px,2.9vw,30px);
-  line-height:1.65;letter-spacing:.03em;color:var(--paper);padding:0 20px;
+  margin:90px auto 0;max-width:840px;text-align:center;
+  font-family:var(--display);font-weight:400;font-size:clamp(20px,2.8vw,29px);
+  line-height:1.65;color:var(--paper);padding:0 20px;
 }
-blockquote .hl{color:var(--amber)}
+blockquote .hl{color:var(--green-soft)}
 blockquote footer{font-family:var(--mono);font-size:12px;color:var(--paper-faint);margin-top:22px;letter-spacing:.15em}
 
 /* ============ FOOTER ============ */
@@ -404,26 +435,27 @@ footer.site .sig{font-family:var(--mono);font-size:11px;letter-spacing:.15em;tex
 <body>
 
 <nav>
-  <div class="brand">HIGGS·AUDIO·V3 <b>/ SGLANG-OMNI</b></div>
+  <div class="brand">HIGGS·AUDIO·V3 <b>/ BOSON AI × SGLANG-OMNI</b></div>
   <div class="links">
-    <a href="#pipeline"><span class="num">01</span>Pipeline</a>
-    <a href="#bottleneck"><span class="num">02</span>Bottlenecks</a>
-    <a href="#stages"><span class="num">03</span>Stage by Stage</a>
-    <a href="#roadmap"><span class="num">04</span>Roadmap</a>
-    <a href="#bench"><span class="num">05</span>Benchmarks</a>
-    <a href="#lessons"><span class="num">06</span>Lessons</a>
+    <a href="#vs"><span class="num">01</span>TTS ≠ LLM</a>
+    <a href="#async"><span class="num">02</span>Multi-Stage Async</a>
+    <a href="#stages"><span class="num">03</span>Four Stages</a>
+    <a href="#dives"><span class="num">04</span>Deep Dives</a>
+    <a href="#demo"><span class="num">05</span>Live Demo</a>
+    <a href="#bench"><span class="num">06</span>Performance</a>
   </div>
 </nav>
 
 <!-- ================= HERO ================= -->
 <header class="hero">
-  <div class="kicker">TTS Inference Optimization · 2026</div>
+  <div class="kicker">Boson AI · TTS Inference Optimization · 2026</div>
   <h1>The Microsecond War<span class="l2">Making Speech Faster Than Sound</span></h1>
   <p class="sub">
-    A full account of optimizing <b>Higgs Audio v3 TTS</b> inference on SGLang-Omni —
-    a <b>four-stage heterogeneous pipeline</b> where hundreds of autoregressive decode steps
-    amplify tens of microseconds of per-step overhead into hundreds of milliseconds of latency.
-    This is layer-by-layer surgery on <b>CUDA graphs, delay-pattern state machines, and windowed streaming vocoding</b>.
+    How <b>Higgs Audio v3 TTS</b> is served on SGLang-Omni. TTS inference looks like LLM inference
+    but breaks every one of its assumptions — so the system was rebuilt as a
+    <b>multi-stage asynchronous pipeline</b>, then each stage was attacked with its own weapon:
+    LRU caching, CUDA graphs, radix caching, and windowed streaming vocoding.
+    There's a <a href="#demo">live voice-cloning demo</a> at the end — record your voice and hear it speak.
   </p>
   <div class="hero-stats">
     <div class="stat"><div class="v">0.147<em>RTF</em></div><div class="k">PER-REQUEST · FAR FASTER THAN REAL-TIME</div></div>
@@ -434,52 +466,143 @@ footer.site .sig{font-family:var(--mono);font-size:11px;letter-spacing:.15em;tex
   <div class="wave-strip"><div class="bars" id="waveBars"></div></div>
 </header>
 
-<!-- ================= 01 PIPELINE ================= -->
-<section id="pipeline">
-  <div class="sec-head reveal"><span class="no">01</span><h2>An Assembly Line for Sound</h2></div>
+<!-- ================= 01 TTS vs LLM ================= -->
+<section id="vs">
+  <div class="sec-head reveal"><span class="no">01</span><h2>SGLang vs SGLang-Omni: TTS Is Not an LLM</h2></div>
   <p class="sec-lede reveal">
-    Optimizing TTS looks like optimizing an LLM. It isn't. Higgs Audio v3 (~4B params, Qwen3 backbone)
-    splits its end-to-end path into <b>four stages with entirely different compute patterns</b>,
-    latency requirements, and memory behavior. Understanding how data moves through them is the
-    prerequisite for everything that follows.
+    SGLang serves one model with one compute pattern: a transformer that eats tokens and emits tokens.
+    Higgs Audio v3 has that transformer inside it — but wrapped in a neural audio codec, a multi-codebook
+    delay schedule, and a waveform decoder. <b>Same backbone, completely different serving problem.</b>
+  </p>
+  <div class="vs-grid reveal">
+    <div class="vs-col llm">
+      <span class="vtag">SGLANG · LLM INFERENCE</span>
+      <h3>One model, one pattern</h3>
+      <div class="vsub">text in → text out</div>
+      <ul>
+        <li><b>Single stage.</b> Prefill + decode on the same transformer; one scheduler owns the GPU.</li>
+        <li><b>The token is the product.</b> A sampled token goes straight to the user — no further compute needed.</li>
+        <li><b>Chunking is free.</b> Text can be cut anywhere; streaming means flushing tokens as they sample.</li>
+        <li><b>One head, one vocabulary.</b> Each step emits exactly one token.</li>
+        <li><b>Latency budget</b> is dominated by the backbone forward; per-step overhead is real but secondary.</li>
+        <li><b>Memory model:</b> one global KV-cache pool, one scheduler fraction.</li>
+      </ul>
+    </div>
+    <div class="vs-col tts">
+      <span class="vtag">SGLANG-OMNI · TTS INFERENCE</span>
+      <h3>A pipeline, not a model</h3>
+      <div class="vsub">text + reference voice in → waveform out</div>
+      <ul>
+        <li><b>Four heterogeneous stages.</b> CPU preprocessing, codec encoder, AR engine, vocoder — different compute patterns, latency needs, memory behavior.</li>
+        <li><b>The token is an intermediate.</b> Audio codes are worthless until a vocoder turns them into waveform — every request pays a second GPU model.</li>
+        <li><b>Chunking is dangerous.</b> Naive splits produce audible clicks at every seam; the codec carries convolutional state across chunks.</li>
+        <li><b>Eight codebooks per step</b>, offset by a delay pattern — a state machine, not a single argmax.</li>
+        <li><b>Latency budget</b> is dominated by per-step overhead: 400–800 steps for 10s of speech amplify every microsecond.</li>
+        <li><b>Memory model:</b> multiple models on one GPU must split memory by explicit contract.</li>
+      </ul>
+    </div>
+  </div>
+  <div class="vs-verdict reveal">
+    <b>The consequence:</b> you cannot serve this by bolting an encoder and a vocoder onto an LLM server's
+    request loop. The stages would serialize, queue behind each other, and fight for GPU memory.
+    The fix is architectural — make the stages first-class and run them <b>asynchronously</b>.
+  </div>
+</section>
+
+<!-- ================= 02 MULTI-STAGE ASYNC ================= -->
+<section id="async">
+  <div class="sec-head reveal"><span class="no">02</span><h2>Why Multi-Stage Async Wins</h2></div>
+  <p class="sec-lede reveal">
+    SGLang-Omni makes each stage an independent process with its own scheduler, connected by a
+    <b>Coordinator</b> over split control/data planes. Stages stop waiting for each other —
+    while request A is in the vocoder, request B is mid-decode and request C is being encoded.
+  </p>
+  <div class="flow reveal">
+    <div class="flow-row sync">
+      <div class="f-title">✕ MONOLITHIC / SYNCHRONOUS — stages serialize, GPU idles between phases</div>
+      <div class="lane"><span class="ln">request A</span><div class="seg enc" style="flex:1.2"></div><div class="seg ar" style="flex:5"></div><div class="seg voc" style="flex:1"></div><div class="seg idle" style="flex:7.2"></div></div>
+      <div class="lane"><span class="ln">request B</span><div class="seg idle" style="flex:7.2"></div><div class="seg enc" style="flex:1.2"></div><div class="seg ar" style="flex:5"></div><div class="seg voc" style="flex:1"></div></div>
+      <div class="flow-note">B waits for A's <b>entire pipeline</b> to drain. Encoder and vocoder sit cold while the AR loop runs.</div>
+    </div>
+    <div class="flow-row async">
+      <div class="f-title">✓ MULTI-STAGE ASYNC — stages overlap across requests, every unit stays busy</div>
+      <div class="lane"><span class="ln">request A</span><div class="seg enc" style="flex:1.2"></div><div class="seg ar" style="flex:5"></div><div class="seg voc" style="flex:1"></div><div class="seg idle" style="flex:2.3"></div></div>
+      <div class="lane"><span class="ln">request B</span><div class="seg idle" style="flex:1.2"></div><div class="seg enc" style="flex:1.2"></div><div class="seg ar" style="flex:5"></div><div class="seg voc" style="flex:1"></div><div class="seg idle" style="flex:1.1"></div></div>
+      <div class="lane"><span class="ln">request C</span><div class="seg idle" style="flex:2.4"></div><div class="seg enc" style="flex:1.2"></div><div class="seg ar" style="flex:5"></div><div class="seg voc" style="flex:1"></div></div>
+      <div class="flow-note">Encoder, AR engine, and vocoder all process <b>different requests simultaneously</b> — pipeline parallelism across stages, continuous batching within the AR stage.</div>
+      <div class="legend-row">
+        <span><i style="background:rgba(96,165,250,.75)"></i>encoder</span>
+        <span><i style="background:rgba(7,196,0,.55)"></i>AR decode</span>
+        <span><i style="background:rgba(175,234,250,.8)"></i>vocoder</span>
+        <span><i style="background:var(--panel);border:1px dashed var(--line-2)"></i>waiting / done</span>
+      </div>
+    </div>
+  </div>
+  <div class="benefits">
+    <div class="benefit reveal">
+      <div class="bi">BENEFIT / 01</div>
+      <h4>Right scheduler per stage</h4>
+      <p>The AR stage runs <code>OmniScheduler</code> with SGLang's continuous batching, KV-cache management and CUDA graph support; encoder and aggregator use a lean <code>SimpleScheduler</code>; streaming stages get <code>StreamingSimpleScheduler</code>. No stage drags another's machinery around.</p>
+    </div>
+    <div class="benefit reveal" style="transition-delay:.1s">
+      <div class="bi">BENEFIT / 02</div>
+      <h4>Memory as a contract</h4>
+      <p>Each stage on a GPU declares <code>total_gpu_memory_fraction</code>, and placement validation sums the budget per GPU before startup. Encoder, AR engine, and vocoder coexist on one H100 without silently starving each other.</p>
+    </div>
+    <div class="benefit reveal" style="transition-delay:.2s">
+      <div class="bi">BENEFIT / 03</div>
+      <h4>Streaming-aware data movement</h4>
+      <p>Control messages travel a ZMQ/msgpack control plane; tensors move on a relay data plane (<code>shm</code>, <code>nccl</code>, <code>nixl</code>, <code>mooncake</code>), with CUDA IPC for same-GPU chunks. Audio windows flow downstream while the AR loop is still generating.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ================= 03 FOUR STAGES ================= -->
+<section id="stages">
+  <div class="sec-head reveal"><span class="no">03</span><h2>The Four Stages — and What Each One Got</h2></div>
+  <p class="sec-lede reveal">
+    A request walks through four stations. Each has a different job, a different bottleneck,
+    and got a different set of optimizations — detailed one by one in the deep dives below.
   </p>
   <div class="pipe reveal">
     <div class="node">
       <span class="tag cpu">CPU · I/O BOUND</span>
-      <h3>Preprocessing</h3>
-      <p>Text tokenization and reference-audio loading. Unglamorous, but it shapes how requests queue before they ever touch a GPU.</p>
-      <span class="mono-note">tokenize + ref-audio load</span>
+      <h3>1 · Preprocessing</h3>
+      <p>Tokenizes text, loads and decodes the reference audio. Negligible FLOPs, but every extra stage hop costs a queue and a serialization boundary.</p>
+      <span class="mono-note">text + ref audio → tensors</span>
+      <div class="opts"><span>fused into encoder stage</span></div>
     </div>
     <div class="node">
       <span class="tag gpu">GPU · STATIC COMPUTE</span>
-      <h3>Audio Encoder</h3>
-      <p>HiggsAudioCodec — a DAC-style neural codec — compresses the reference waveform into discrete tokens. 50–100ms per encode.</p>
-      <span class="mono-note">waveform → [T, 8] tokens</span>
+      <h3>2 · Audio Encoder</h3>
+      <p>HiggsAudioCodec (DAC-style neural codec) compresses the reference waveform into discrete tokens — the voice-cloning prompt. 50–100ms per encode, deterministic per input.</p>
+      <span class="mono-note">waveform → [T, 8] @ 25fps</span>
+      <div class="opts"><span>LRU cache</span><span>batched encoder</span><span>torch.compile</span></div>
     </div>
     <div class="node">
       <span class="tag gpu">GPU · AUTOREGRESSIVE</span>
-      <h3>TTS Engine</h3>
-      <p>A Qwen3-based AR model generates multi-codebook tokens step by step. Eight codebook embeddings fused into a single lookup.</p>
+      <h3>3 · AR Engine</h3>
+      <p>Qwen3-4B backbone generates 8 codebook tokens per step under the delay pattern. 400–800 steps per 10s of speech — per-step overhead is the enemy.</p>
       <span class="mono-note">step-by-step → [B, 8, V]</span>
+      <div class="opts"><span>CUDA graph</span><span>radix cache</span><span>paged attention</span><span>merged D2H</span><span>async lookahead</span></div>
     </div>
     <div class="node">
       <span class="tag gpu">GPU · FAST BUT QUEUE-PRONE</span>
-      <h3>Vocoder</h3>
-      <p>The DAC decoder turns tokens back into audible waveform. Shares weights with the encoder. ~10ms per call.</p>
+      <h3>4 · Vocoder</h3>
+      <p>The DAC decoder (weights shared with the encoder) inverts tokens back into waveform. ~10ms per call, but every AR loop converges here — and streaming audio can't be naively chunked.</p>
       <span class="mono-note">tokens → waveform @ 25fps</span>
+      <div class="opts"><span>batched decode</span><span>windowed streaming</span></div>
     </div>
   </div>
 
   <div class="delay-wrap reveal">
-    <div>
-      <div class="delay-grid" id="delayGrid"></div>
-    </div>
+    <div><div class="delay-grid" id="delayGrid"></div></div>
     <div class="delay-side">
-      <h3>The Delay Pattern: The Hard Part</h3>
-      <p><b>Codebook 0</b> carries coarse structure — pitch, intonation. <b>Codebook 7</b> carries high-frequency texture. Codebook <i class="mono teal">i</i> activates <i class="mono teal">i</i> timesteps after codebook 0, forming a staircase.</p>
-      <p>This creates a four-phase state machine: <b>delay → active → wind-down (codebook 0 hits EOS) → finished</b>. Nearly every AR and vocoder optimization that follows had to be built around this state machine.</p>
+      <h3>One structure rules them all: the delay pattern</h3>
+      <p><b>Codebook 0</b> carries coarse structure (pitch, intonation); <b>codebook 7</b> carries high-frequency texture. Codebook <i class="mono" style="color:var(--blue)">i</i> activates <i class="mono" style="color:var(--blue)">i</i> steps after codebook 0 — a staircase.</p>
+      <p>It defines a four-phase per-request state machine — <b>delay → active → wind-down (codebook 0 hits EOS) → finished</b> — that the encoder must emit, the AR engine must advance every step, and the vocoder must invert. Each deep dive below collides with it.</p>
       <div class="legend">
-        <span class="a"><i></i>codebook 0 (structure)</span>
+        <span class="a"><i></i>codebook 0</span>
         <span class="b"><i></i>active</span>
         <span class="c"><i></i>waiting on delay</span>
       </div>
@@ -487,265 +610,220 @@ footer.site .sig{font-family:var(--mono);font-size:11px;letter-spacing:.15em;tex
   </div>
 </section>
 
-<!-- ================= 02 BOTTLENECK ================= -->
-<section id="bottleneck">
-  <div class="sec-head reveal"><span class="no">02</span><h2>Profiling: Three Real Bottlenecks</h2></div>
-  <p class="sec-lede reveal">Measure first, cut second. Profiling showed the bottleneck was never the "big model forward pass" — it was <b>tiny overheads amplified by hundreds of steps</b>.</p>
-  <div class="bn-grid">
-    <div class="bn reveal" data-no="I">
-      <div class="b-tag">BOTTLENECK / 01</div>
-      <h3>AR Decode Dominates Everything</h3>
-      <p>Ten seconds of speech takes 400–800 decode steps. Every step runs a backbone forward, head projection, sampling, and a device-to-host sync — 0.1ms of per-step overhead becomes ~80ms end to end.</p>
-      <div class="fig"><b>400–800</b>steps per 10s of speech · microseconds become milliseconds</div>
-    </div>
-    <div class="bn reveal" data-no="II" style="transition-delay:.1s">
-      <div class="b-tag">BOTTLENECK / 02</div>
-      <h3>The Encoder Is Expensive but Static</h3>
-      <p>Each encode costs 50–100ms — yet in production, users reuse the same reference voice across many prompts. The same computation runs again and again for identical input.</p>
-      <div class="fig"><b>50–100ms</b>per encode · repeated voices = repeated waste</div>
-    </div>
-    <div class="bn reveal" data-no="III" style="transition-delay:.2s">
-      <div class="b-tag">BOTTLENECK / 03</div>
-      <h3>Head-of-Line Blocking at the Vocoder</h3>
-      <p>A single call takes only ~10ms, but under load multiple AR loops finish simultaneously: 16 requests at 15ms each, decoded serially, leave the last one waiting 240ms for no good reason.</p>
-      <div class="fig"><b>240ms</b>tail wait @ 16 concurrent · fast kernels ≠ a fast system</div>
-    </div>
-  </div>
-</section>
-
-<!-- ================= 03 STAGES ================= -->
-<section id="stages">
-  <div class="sec-head reveal"><span class="no">03</span><h2>Stage by Stage: The Surgery</h2></div>
+<!-- ================= 04 DEEP DIVES ================= -->
+<section id="dives">
+  <div class="sec-head reveal"><span class="no">04</span><h2>Deep Dives, Stage by Stage</h2></div>
   <p class="sec-lede reveal">
-    Each stage got its own treatment: the encoder <b>eliminates compute</b> with caching,
-    the AR engine <b>eliminates overhead</b> with CUDA graphs, the vocoder <b>eliminates queueing</b>
-    with batching and windowing — and the whole thing crystallizes into a framework.
-    Issue/PR numbers link to the public roadmap (<a href="https://github.com/sgl-project/sglang-omni/issues/478" target="_blank">sglang-omni #478</a>).
+    Issue/PR numbers link to the public roadmap, <a href="https://github.com/sgl-project/sglang-omni/issues/478" target="_blank">sglang-omni #478</a> —
+    whose stated goal was <b>"low latency and high throughput with no model performance reduction."</b>
   </p>
 
-  <!-- STAGE I -->
-  <div class="stage reveal">
-    <div class="stage-head"><span class="sno">Ⅰ</span><h3>Preprocessing <span class="en">→ fused into the encoder</span></h3></div>
-    <div class="stage-meta">CPU · tokenization + reference audio I/O</div>
-    <div class="stage-grid">
-      <div class="stage-what">
-        <p>The CPU-side stage: tokenize input text, load and decode the reference audio. It contributes little compute but adds <b>an extra inter-stage hop</b> — and every hop means serialization, a queue, and another scheduling decision before the request ever reaches a GPU.</p>
-        <p>The fix here is structural, not algorithmic: <b>collapse the stage entirely</b>. Preprocessing was fused into the encoder stage, so each request crosses one boundary fewer.</p>
+  <!-- ENCODER -->
+  <div class="dive reveal">
+    <div class="dive-head"><span class="sno">A</span><h3>Encoder <span class="en">— the fastest compute is no compute</span></h3></div>
+    <div class="dive-meta">LRU cache · batched encoding · torch.compile</div>
+    <div class="dive-grid">
+      <div class="dive-what">
+        <p>The encoder's profile: <b>expensive (50–100ms), deterministic, and repetitive</b>. The same reference voice produces the same tokens every time, and production users reuse a handful of voices across thousands of prompts. Profiling says: most encoder work is recomputation of known answers.</p>
+        <p>So the optimization order is: <b>skip it</b> (cache), <b>amortize it</b> (batch), <b>compile it</b> (static convolutional graph — the one place torch.compile genuinely fits).</p>
         <div class="spec">
-          <span class="sl">role</span> &nbsp;text → token ids · audio file → waveform<br>
-          <span class="sl">cost</span> &nbsp;I/O-bound, negligible FLOPs<br>
-          <span class="sl">fix</span> &nbsp;<b>stage fusion</b> — fewer hops, less queueing
-        </div>
-      </div>
-      <div class="moves">
-        <div class="move">
-          <div class="m-name"><span class="mk">FUSE</span>Merge preprocessing into the encoder stage</div>
-          <p>One fewer coordinator hop, one fewer queue, one fewer serialization boundary per request. The pipeline gets shorter before it gets faster.</p>
-          <div class="pr-row"><a class="pr" href="https://github.com/sgl-project/sglang-omni/issues/576" target="_blank">#576</a></div>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- STAGE II -->
-  <div class="stage reveal">
-    <div class="stage-head"><span class="sno">Ⅱ</span><h3>Audio Encoder <span class="en">— the fastest compute is no compute</span></h3></div>
-    <div class="stage-meta">GPU · HiggsAudioCodec (DAC-style) · waveform → [T, 8] @ 25fps · 50–100ms per encode</div>
-    <div class="stage-grid">
-      <div class="stage-what">
-        <p>The encoder converts a reference-voice waveform into discrete tokens across <b>8 parallel codebooks</b>. The output is then rearranged into the delay pattern that the AR engine consumes as its voice-cloning prompt.</p>
-        <p>Its defining property: the computation is <b>deterministic for a given input</b>. Same reference audio in, same tokens out — every time. And in production, users overwhelmingly reuse a small set of voices across many prompts. That makes this stage a textbook caching target.</p>
-        <p>Where compute can't be skipped, it can still be made cheaper: the encoder is a static-shape convolutional network — exactly the workload <code>torch.compile</code> is good at, with no dynamic control flow to fight.</p>
-        <div class="spec">
-          <span class="sl">arch</span> &nbsp;DAC-style neural codec, weights shared with vocoder<br>
-          <span class="sl">out</span> &nbsp;<b>[T, 8]</b> tokens · rearranged into delay pattern<br>
+          <span class="sl">arch</span> &nbsp;DAC-style codec, weights shared with vocoder<br>
+          <span class="sl">out</span> &nbsp;<b>[T, 8]</b> tokens → rearranged into delay pattern<br>
           <span class="sl">key fact</span> &nbsp;deterministic per input → <b>cacheable</b>
         </div>
       </div>
       <div class="moves">
         <div class="move">
-          <div class="m-name"><span class="mk">CACHE</span>LRU cache keyed by reference audio</div>
-          <p>If the same voice was seen before, skip the encoder entirely and fetch precomputed delay tokens — 50–100ms saved per cache hit, and the GPU stays free for AR decode.</p>
+          <div class="m-name"><span class="mk">LRU</span>LRU cache keyed by reference audio</div>
+          <p>Seen this voice before? Skip the encoder entirely and return the precomputed delay tokens. Every hit saves 50–100ms of GPU time <b>and</b> keeps the GPU free for AR decode — a double win under load.</p>
           <div class="pr-row"><a class="pr" href="https://github.com/sgl-project/sglang-omni/issues/562" target="_blank">#562</a><a class="pr" href="https://github.com/sgl-project/sglang-omni/pull/563" target="_blank">#563</a><a class="pr" href="https://github.com/sgl-project/sglang-omni/pull/605" target="_blank">#605</a></div>
         </div>
         <div class="move">
-          <div class="m-name"><span class="mk">COMPILE</span>torch.compile on the encoder</div>
-          <p>Static shapes, convolutional stack, no branching — the encoder is the one part of the system where compilation actually pays off. (Contrast with the AR loop below, where it was removed.)</p>
-          <div class="pr-row"><a class="pr" href="https://github.com/sgl-project/sglang-omni/pull/612" target="_blank">#612</a></div>
-        </div>
-        <div class="move cut">
-          <div class="m-name"><span class="mk">DEMOTED</span>Online batched encoding → offline warmup only</div>
-          <p>Length-bucketed online batch encoding raised throughput on paper. In production it turned GPU utilization from smooth into <b>bursty spikes</b> that fought the concurrent AR decode loops for resources. Batched encoding was demoted to offline server warmup; the online path stays isolated. <b>Paper optimization ≠ production optimization.</b></p>
+          <div class="m-name"><span class="mk">BATCH</span>Batched encoder — with a production twist</div>
+          <p>Length-bucketed batch encoding lifts encoder throughput on paper. Measured in production, it turned GPU utilization from smooth into <b>bursty spikes</b> that fought the concurrent AR loops for SMs. Verdict: batched encoding was kept for <b>offline warmup</b> (pre-populating the voice cache at server start), while the online path encodes in isolation. Paper optimization ≠ production optimization.</p>
           <div class="pr-row"><a class="pr" href="https://github.com/sgl-project/sglang-omni/issues/603" target="_blank">#603</a><a class="pr" href="https://github.com/sgl-project/sglang-omni/pull/610" target="_blank">#610</a></div>
         </div>
-        <div class="move open">
-          <div class="m-name"><span class="mk">OPEN</span>Encoder CUDA graph</div>
-          <p>Capturing the encoder forward into a CUDA graph is still on the roadmap — the remaining launch overhead on cache misses.</p>
+        <div class="move">
+          <div class="m-name"><span class="mk">COMPILE</span>torch.compile on the encoder</div>
+          <p>Static shapes, a convolutional stack, no data-dependent branching — the encoder is the textbook torch.compile workload, and here it stays. (Spoiler: it did <b>not</b> survive on the AR backbone — see below.)</p>
+          <div class="pr-row"><a class="pr" href="https://github.com/sgl-project/sglang-omni/pull/612" target="_blank">#612</a></div>
         </div>
       </div>
     </div>
   </div>
 
-  <!-- STAGE III -->
-  <div class="stage reveal">
-    <div class="stage-head"><span class="sno">Ⅲ</span><h3>AR Engine <span class="en">— microsecond surgery</span></h3></div>
-    <div class="stage-meta">GPU · Qwen3-4B backbone · fused 8-codebook head [B, 8, V] · 400–800 steps / 10s speech</div>
-    <div class="stage-grid">
-      <div class="stage-what">
-        <p>The heart of the system. Each decode step runs the backbone forward, projects to <b>eight codebook heads at once</b> (embeddings fused into a single lookup producing <code>[B, 8, V]</code>), samples eight tokens, advances the delay-pattern state machine, and reports back to the CPU.</p>
-        <p>At 400–800 steps per request, the enemy is not FLOPs — it is <b>per-step fixed cost</b>: kernel-launch latency from dozens of tiny kernels, and pipeline stalls from device-to-host synchronization. Every microsecond removed here is multiplied by ~600.</p>
-        <p>The campaign ran as four moves, each attacking one class of overhead — and ended with a deliberate removal and a debugging war story.</p>
+  <!-- AR -->
+  <div class="dive reveal">
+    <div class="dive-head"><span class="sno">B</span><h3>AR Engine <span class="en">— CUDA graphs, radix cache, paged attention</span></h3></div>
+    <div class="dive-meta">Qwen3-4B backbone · fused 8-codebook head · 400–800 steps per 10s of speech</div>
+    <div class="dive-grid">
+      <div class="dive-what">
+        <p>The heart of the system, and the main battleground. Each decode step: backbone forward → fused projection to eight codebook heads (<code>[B, 8, V]</code>) → sample eight tokens → advance the delay-pattern state machine → report to the CPU.</p>
+        <p>At 400–800 steps per request, the enemy is not FLOPs but <b>per-step fixed cost</b>: dozens of tiny kernel launches and device-to-host syncs. At ~0.1ms of overhead per step, that's <b>~80ms of pure waste per request</b> — every microsecond removed here is multiplied by ~600.</p>
+        <p>Because the AR stage runs SGLang's <code>OmniScheduler</code>, it inherits two LLM-world weapons for free — <b>paged attention and the radix cache</b> — and adds the TTS-specific ones on top.</p>
         <div class="spec">
-          <span class="sl">state machine</span> &nbsp;delay → active → wind-down → finished<br>
           <span class="sl">per-step</span> &nbsp;forward · 8-head projection · sample · D2H<br>
-          <span class="sl">enemy</span> &nbsp;launch overhead × <b>~600 steps</b>, not FLOPs
+          <span class="sl">state machine</span> &nbsp;delay → active → wind-down → finished<br>
+          <span class="sl">enemy</span> &nbsp;launch + sync overhead × <b>~600 steps</b>
         </div>
       </div>
       <div class="moves">
+        <div class="move concept">
+          <div class="m-name"><span class="mk">CONCEPT</span>What a CUDA graph actually is</div>
+          <p>Normally the CPU launches every GPU kernel one by one, and each launch costs <b>5–10 microseconds</b> of driver overhead. For big kernels that's noise; for an AR decode step made of dozens of tiny kernels, the CPU becomes the bottleneck — the GPU finishes work faster than the CPU can feed it.</p>
+          <p>A <b>CUDA graph</b> records the entire kernel sequence once, then replays the whole step as a <b>single launch</b>. The catch: the recording is frozen. Same kernels, same shapes, same memory addresses, every replay. Any data-dependent Python branch — <code>if request.finished:</code> — breaks the contract.</p>
+        </div>
         <div class="move">
-          <div class="m-name"><span class="mk">MOVE 1</span>Capture the decode loop in a CUDA graph</div>
-          <p>A CUDA graph replays a <b>fixed</b> kernel sequence — any data-dependent Python branch breaks the recording, and the delay-pattern state machine was full of them. The fix: rewrite the state machine as <b>in-place tensor ops on fixed addresses</b>. Per-request decode state (delay counters, EOC countdowns, finished flags, last-emitted codes, sampled outputs) is pre-allocated once as <code>[max_batch, …]</code> buffers and overwritten in place each step. Around the captured graph, the runner copies active rows from the request pool into fixed "shadow" buffers, lets the graph read and update them in place, then scatters results back — all GPU-to-GPU.</p>
+          <div class="m-name"><span class="mk">APPLY</span>Rewriting the delay pattern to fit the graph</div>
+          <p>The delay-pattern state machine was exactly what CUDA graphs forbid: per-request Python branching on delay counters, EOS detection, and wind-down logic. The rewrite turned <b>control flow into data flow</b>: every branch became a branchless, in-place tensor op on pre-allocated <code>[max_batch, …]</code> buffers — delay counters, EOC countdowns, finished flags, last-emitted codes — masked arithmetic instead of <code>if</code>/<code>else</code>, overwritten at fixed addresses every step.</p>
+          <p>Around the frozen graph, a runner copies active requests' state from the request pool into fixed <b>"shadow" buffers</b>, replays the graph, and scatters results back — all GPU-to-GPU, no host round-trip.</p>
           <div class="pr-row"><a class="pr" href="https://github.com/sgl-project/sglang-omni/pull/503" target="_blank">#503</a></div>
         </div>
         <div class="move">
-          <div class="m-name"><span class="mk">MOVE 2</span>Merge three D2H syncs into one</div>
-          <p>The baseline did three separate device-to-host syncs per step to check tokens and state — three pipeline stalls. All intermediate results now land in a single staging tensor (<code>_cg_collect_staging</code>) and cross to the CPU in <b>one combined transfer</b>: <code>staging[:n].cpu()</code>.</p>
-          <div class="pr-row"><a class="pr" href="https://github.com/sgl-project/sglang-omni/issues/564" target="_blank">#564</a><a class="pr" href="https://github.com/sgl-project/sglang-omni/pull/572" target="_blank">#572</a></div>
+          <div class="m-name"><span class="mk">GAIN</span>What it bought — and the two follow-ups</div>
+          <p>Graph replay collapses dozens of per-step launches into one, removing the per-step CPU overhead that was costing <b>tens of milliseconds per request</b> (~0.1ms × 400–800 steps). Two follow-ups finished the job: the three per-step D2H syncs were <b>merged into one</b> staging-tensor transfer (<code>staging[:n].cpu()</code>), and <b>async one-step-lookahead decode</b> exploited the fact that the token causal chain closes on the GPU — step t+1 launches before the CPU has processed step t, hiding host transfer entirely behind compute. Together these drive the single-request RTF to <b>0.147</b>.</p>
+          <div class="pr-row"><a class="pr" href="https://github.com/sgl-project/sglang-omni/issues/564" target="_blank">#564</a><a class="pr" href="https://github.com/sgl-project/sglang-omni/pull/572" target="_blank">#572</a><a class="pr" href="https://github.com/sgl-project/sglang-omni/pull/590" target="_blank">#590</a></div>
         </div>
         <div class="move">
-          <div class="m-name"><span class="mk">MOVE 3</span>Async one-step-lookahead decode</div>
-          <p>The key insight: the token causal chain <b>closes entirely on the GPU</b>. Step t+1 doesn't need the CPU's processing of step t's samples — so the GPU launches it immediately. A GPU-side sampler pool (<code>[max_bs+1, 8]</code>) holds each request's latest codes; the CPU reads last step's output from host staging, fills row tables and sampling params, and the two sides communicate through shared <b>ping-pong buffers</b>. The GPU never waits; host transfer cost is fully hidden.</p>
-          <div class="pr-row"><a class="pr" href="https://github.com/sgl-project/sglang-omni/pull/590" target="_blank">#590</a></div>
+          <div class="m-name"><span class="mk">RADIX</span>Radix cache, partitioned by voice</div>
+          <p>SGLang's <b>RadixAttention</b> stores the KV cache of previous requests in a prefix tree, so a new request sharing a prefix skips that prefill. In TTS the shared prefix is the <b>reference voice's tokens</b> — so the cache is namespaced with an <code>extra_key</code> per reference audio. Requests using the same voice reuse its KV; different voices can never collide. The encoder's LRU and the radix cache stack: a repeated voice skips <b>both</b> the codec encode and the prompt prefill.</p>
+        </div>
+        <div class="move">
+          <div class="m-name"><span class="mk">PAGED</span>Paged attention for free</div>
+          <p>KV memory is managed in fixed-size pages rather than contiguous per-request slabs — no fragmentation, no over-reservation, which is what lets <b>16 concurrent AR loops</b> share one H100 alongside the encoder and vocoder. Inherited from the SGLang scheduler rather than rebuilt — the payoff of reusing <code>OmniScheduler</code> instead of a custom one.</p>
+          <div class="pr-row"><a class="pr" href="https://github.com/sgl-project/sglang-omni/pull/476" target="_blank">#476</a></div>
         </div>
         <div class="move cut">
-          <div class="m-name"><span class="mk">CUT</span>torch.compile on the backbone — evaluated, then removed</div>
-          <p>With manual CUDA graphs already eliminating launch overhead, compilation offered only marginal throughput — while adding a heavy cold-start compile penalty. It was removed as a pragmatic trade: fast initialization over redundant runtime optimization.</p>
-          <div class="pr-row"><a class="pr" href="https://github.com/sgl-project/sglang-omni/issues/565" target="_blank">#565</a><a class="pr" href="https://github.com/sgl-project/sglang-omni/pull/579" target="_blank">#579</a></div>
-        </div>
-        <div class="callout danger">
-          <b>War story — the 100% WER cliff:</b> at CUDA-graph batch sizes ≥ 16, WER outliers went catastrophic — <b>99–100% WER versus a 0.1–0.4% baseline</b> — when <code>torch.compile</code> was enabled on the backbone at <code>bs == cuda_graph_max_bs</code>. Diagnosis traced it to an upstream SGLang × Inductor CUDA-graph-capture interaction. Mitigation: cap <code>_compiled_max_decode_bs = 12</code> until the upstream fix lands. Correctness bugs in inference systems don't always crash — sometimes they just speak gibberish. (<a href="https://github.com/sgl-project/sglang-omni/issues/578" target="_blank">#578</a>, <a href="https://github.com/sgl-project/sglang-omni/pull/579" target="_blank">#579</a>)
+          <div class="m-name"><span class="mk">CUT</span>torch.compile on the backbone — removed</div>
+          <p>With manual CUDA graphs already eliminating launch overhead, compilation added only marginal throughput but a heavy cold-start penalty — so it was dropped. It also hid a trap: at CG batch ≥ 16 with compile enabled, WER exploded from <b>0.1–0.4% to 99–100%</b> (an upstream SGLang × Inductor capture interaction; mitigated by capping <code>_compiled_max_decode_bs=12</code>). Correctness bugs in audio don't crash — they speak gibberish.</p>
+          <div class="pr-row"><a class="pr" href="https://github.com/sgl-project/sglang-omni/issues/565" target="_blank">#565</a><a class="pr" href="https://github.com/sgl-project/sglang-omni/issues/578" target="_blank">#578</a><a class="pr" href="https://github.com/sgl-project/sglang-omni/pull/579" target="_blank">#579</a></div>
         </div>
       </div>
     </div>
   </div>
 
-  <!-- STAGE IV -->
-  <div class="stage reveal">
-    <div class="stage-head"><span class="sno">Ⅳ</span><h3>Vocoder <span class="en">— batching + windowed streaming</span></h3></div>
-    <div class="stage-meta">GPU · DAC decoder, weights shared with encoder · ~10ms per call · 25fps output</div>
-    <div class="stage-grid">
-      <div class="stage-what">
-        <p>The vocoder inverts the codec: delay-pattern tokens back into waveform. Fast per call — but it sits at the <b>convergence point</b> of every AR loop, so concurrency turns it into a serial chokepoint.</p>
-        <p>Streaming is where it gets genuinely hard. You cannot chunk audio codes the way you chunk LLM text: a neural codec carries <b>internal convolutional state</b>, and decoding chunks independently produces an audible click at every seam. Worse, the delay pattern means any mid-stream snapshot has <b>incomplete trailing rows</b> — the higher codebooks haven't caught up yet — and decoding them injects noise.</p>
-        <p>The solution is a carefully tuned window protocol: accumulate, re-decode the boundary, crossfade, and hold back what isn't ready.</p>
+  <!-- VOCODER -->
+  <div class="dive reveal">
+    <div class="dive-head"><span class="sno">C</span><h3>Vocoder <span class="en">— streaming without the clicks</span></h3></div>
+    <div class="dive-meta">DAC decoder · ~10ms per call · batched decode + windowed streaming</div>
+    <div class="dive-grid">
+      <div class="dive-what">
+        <p>The vocoder inverts the codec: delay-pattern tokens back into waveform. Two distinct problems live here.</p>
+        <p><b>Problem one — queueing.</b> Every AR loop converges on this stage. Under 16-way concurrency, finished requests pile up and decode serially: 16 × 15ms means the last request waits 240ms. Fixed by batching.</p>
+        <p><b>Problem two — streaming.</b> Audio cannot be chunked like LLM text. The codec's transposed convolutions carry <b>internal state across time</b>; decode two chunks independently and the waveforms disagree at the boundary — an audible click at every seam. And mid-stream, the delay pattern's trailing rows are <b>incomplete</b> (high codebooks still filling); decode them and you inject noise.</p>
         <div class="spec">
-          <span class="sl">stride</span> &nbsp;<b>75 frames</b> — accumulate before decoding, amortize launches<br>
-          <span class="sl">overlap</span> &nbsp;<b>8 frames</b> — re-decode into the previous window, crossfade<br>
-          <span class="sl">hold-back</span> &nbsp;<b>4 frames</b> — keep incomplete tail rows until final flush<br>
-          <span class="sl">floor</span> &nbsp;≥ N rows needed to invert the pattern → TTFB ≈ <b>300–400ms</b>
+          <span class="sl">stride</span> &nbsp;<b>75 frames</b> — accumulate, then decode<br>
+          <span class="sl">overlap</span> &nbsp;<b>8 frames</b> — re-decode boundary + crossfade<br>
+          <span class="sl">hold-back</span> &nbsp;<b>4 frames</b> — incomplete tail rows wait<br>
+          <span class="sl">floor</span> &nbsp;≥ N rows to invert the pattern → TTFB ≈ <b>300–400ms</b>
         </div>
       </div>
       <div class="moves">
         <div class="move">
           <div class="m-name"><span class="mk">BATCH</span>Batched vocoder decode</div>
-          <p>Requests are collected inside a tight <code>max_batch_wait_ms=2ms</code> window, zero-padded to the batch max length, stacked as <code>[B, num_codebooks, max_len]</code>, and decoded in one <code>codec.decode_batch()</code> call. Each waveform is then trimmed back to its true length (<code>length × samples_per_frame</code>). The 240ms tail wait disappears.</p>
+          <p>Collect requests inside a tight <code>max_batch_wait_ms=2ms</code> window, zero-pad to the batch max, stack as <code>[B, num_codebooks, max_len]</code>, decode in one <code>codec.decode_batch()</code> call, then trim each waveform to its true length. The 240ms tail wait disappears.</p>
           <div class="pr-row"><a class="pr" href="https://github.com/sgl-project/sglang-omni/issues/569" target="_blank">#569</a><a class="pr" href="https://github.com/sgl-project/sglang-omni/pull/574" target="_blank">#574</a></div>
         </div>
         <div class="move">
-          <div class="m-name"><span class="mk">STREAM</span>Windowed streaming with overlap + crossfade</div>
-          <p>Codes accumulate until the 75-frame stride triggers a decode. The decoder <b>backtracks 8 frames into the previous window</b> and re-decodes jointly, so the codec sees continuous context across the boundary. Only the new samples past the overlap are emitted, blended with the previous chunk's held tail using a <b>linear fade-in/fade-out envelope</b> — smoothing any residual amplitude mismatch. Four trailing frames stay held back (their high codebooks are still filling) until the final flush. No clicks, no noise injection.</p>
+          <div class="m-name"><span class="mk">COMPARE</span>Non-streaming vs streaming</div>
+          <div class="sv-grid">
+            <div class="sv non">
+              <h5>NON-STREAMING</h5>
+              <div class="tline">
+                <div class="tseg" style="flex:7;background:rgba(7,196,0,.45)">generate ALL codes</div>
+                <div class="tseg" style="flex:1.2;background:rgba(175,234,250,.7);color:#06343f">decode</div>
+                <div class="tseg" style="flex:1.6;background:var(--green);color:#06250a">▶ play</div>
+              </div>
+              <p>User hears nothing until the <b>entire utterance</b> is generated and decoded. Simple and seam-free — but first audio arrives after seconds, unusable for conversation.</p>
+            </div>
+            <div class="sv str">
+              <h5>WINDOWED STREAMING</h5>
+              <div class="tline">
+                <div class="tseg" style="flex:1.6;background:rgba(7,196,0,.45)">codes</div>
+                <div class="tseg" style="flex:.5;background:rgba(175,234,250,.7)"></div>
+                <div class="tseg" style="flex:7.7;background:var(--green);color:#06250a">▶ play while generating…</div>
+              </div>
+              <p>Decode in overlapping windows <b>while the AR loop still runs</b>. First audio at ~350ms; generation hides behind playback. The price: boundary management — solved below.</p>
+            </div>
+          </div>
+        </div>
+        <div class="move">
+          <div class="m-name"><span class="mk">STREAM</span>The window protocol: stride / overlap / hold-back</div>
+          <p>Codes accumulate until the <b>75-frame stride</b> triggers a decode. The decoder <b>backtracks 8 frames</b> into the previous window and re-decodes jointly, so the codec sees continuous context across the boundary; only the new samples past the overlap are emitted, blended with the previous chunk's tail by a <b>linear crossfade envelope</b>. The last <b>4 frames stay held back</b> — their high codebooks are still filling — until the final flush. No clicks, no noise injection.</p>
+          <div class="stride mono">
+            <div class="blk stride-b"><div class="bar"></div>stride · 75 — decode trigger</div>
+            <div class="blk ovl"><div class="bar"></div>overlap · 8 — crossfade</div>
+            <div class="blk hold"><div class="bar"></div>hold · 4 — tail</div>
+          </div>
           <div class="pr-row"><a class="pr" href="https://github.com/sgl-project/sglang-omni/pull/597" target="_blank">#597</a><a class="pr" href="https://github.com/sgl-project/sglang-omni/pull/614" target="_blank">#614</a></div>
         </div>
-        <div class="stride mono">
-          <div class="blk stride-b"><div class="bar"></div>stride · 75 frames — decode trigger</div>
-          <div class="blk ovl"><div class="bar"></div>overlap · 8 — re-decode + crossfade</div>
-          <div class="blk hold"><div class="bar"></div>hold · 4 — incomplete tail</div>
-        </div>
         <div class="callout">
-          <b>Irreducible startup cost:</b> the delay pattern means the vocoder needs at least N rows (N = number of codebooks) before it can invert the pattern and emit the first audio frame. Stacked with the stride, measured streaming <b>TTFB lands at ~300–400ms</b> — comfortably under the 500ms conversational threshold.
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- STAGE V -->
-  <div class="stage reveal">
-    <div class="stage-head"><span class="sno">Ⅴ</span><h3>The System Layer <span class="en">— crystallized into SGLang-Omni</span></h3></div>
-    <div class="stage-meta">Coordinator · per-stage schedulers · memory contracts · split control/data planes</div>
-    <div class="stage-grid">
-      <div class="stage-what">
-        <p>The per-model surgery generalized into a framework for <b>multi-stage heterogeneous generation</b>. A config statically declares pipeline stages, GPU placement, and process topology; a <b>Coordinator</b> routes requests between stages; each <b>Stage</b> is an I/O shell that receives upstream data, drives its internal scheduler, and streams output downstream.</p>
-        <p>The design principle: new models should be integrated by <b>declaring a topology and plugging in hooks</b> — not by threading special-case branches through the framework. The same machinery now serves Fish Audio S2-Pro, Voxtral TTS, Qwen3-TTS, MOSS-TTS, and omni models like Qwen3-Omni, Ming-Omni, and LLaDA2.0-Uni.</p>
-        <div class="spec">
-          <span class="sl">refactor</span> &nbsp;custom <b>HiggsScheduler dropped</b> → shared OmniScheduler<br>
-          <span class="sl">principle</span> &nbsp;declare topology + hooks, not special branches<br>
-          <span class="sl">serves</span> &nbsp;5 TTS models + 3 omni models and counting
-        </div>
-      </div>
-      <div class="moves">
-        <div class="move">
-          <div class="m-name"><span class="mk">SCHED</span>One scheduler interface, three implementations</div>
-          <p>The AR stage runs <code>OmniScheduler</code> — inheriting SGLang's continuous batching, mixed prefill/decode scheduling, KV-cache management, RadixAttention, and CUDA graph support. Encoder and aggregator stages use <code>SimpleScheduler</code>; streaming stages use <code>StreamingSimpleScheduler</code>. The custom HiggsScheduler was deleted in favor of the shared one.</p>
-          <div class="pr-row"><a class="pr" href="https://github.com/sgl-project/sglang-omni/pull/476" target="_blank">#476</a></div>
-        </div>
-        <div class="move">
-          <div class="m-name"><span class="mk">CACHE</span>Radix cache partitioned by reference voice</div>
-          <p>RadixAttention prefix caching is namespaced with an <code>extra_key</code> per reference audio — requests sharing a voice reuse prefix KV; requests with different voices never collide.</p>
-        </div>
-        <div class="move">
-          <div class="m-name"><span class="mk">MEM</span>GPU memory as a stage-level contract</div>
-          <p>Each stage on a GPU declares <code>total_gpu_memory_fraction</code>; placement validation sums the budget per GPU <b>before startup</b>. Memory is a negotiated contract between stages, not a single global scheduler fraction — so stages can't silently starve each other.</p>
-        </div>
-        <div class="move">
-          <div class="m-name"><span class="mk">COMM</span>Split control and data planes</div>
-          <p>Control messages (submit, data-ready, stream, complete, abort) travel over a ZMQ/msgpack control plane. Tensor payloads move over a relay data plane with pluggable backends — <code>shm</code>, <code>nccl</code>, <code>nixl</code>, <code>mooncake</code> — with local dispatch for same-process edges and CUDA IPC for same-GPU streaming chunks. A true SSE streaming scheduler pushes first-audio latency down further.</p>
+          <b>Irreducible startup cost:</b> the vocoder needs at least N rows (N = number of codebooks) before it can invert the delay pattern and emit the first frame. Stacked with the stride, measured streaming <b>TTFB ≈ 300–400ms</b> — under the 500ms conversational threshold. You can verify this yourself in the demo below.
         </div>
       </div>
     </div>
   </div>
 </section>
 
-<!-- ================= 04 ROADMAP ================= -->
-<section id="roadmap">
-  <div class="sec-head reveal"><span class="no">04</span><h2>The Roadmap, As It Happened</h2></div>
+<!-- ================= 05 DEMO ================= -->
+<section id="demo">
+  <div class="sec-head reveal"><span class="no">05</span><h2>Live Demo: Clone Your Voice</h2></div>
   <p class="sec-lede reveal">
-    The whole campaign is public — tracked in <a href="https://github.com/sgl-project/sglang-omni/issues/478" target="_blank">sglang-omni #478</a>:
-    <i>"Higgs Audio TTS Performance Optimization Roadmap. Goal: low latency and high throughput with <b>no model performance reduction</b>."</i>
+    Everything above, running in production. Record a few seconds of your voice as the <b>reference audio</b>
+    (the encoder + LRU + radix cache path), type a sentence, and race <b>non-streaming against streaming</b> —
+    the TTFB gap you'll hear is the windowed vocoder at work. Calls go directly from your browser to
+    <code>api.boson.ai</code> · <a href="https://bosonai.mintlify.app/api-reference/text-to-speech/create-speech" target="_blank">API docs</a>.
   </p>
-  <div class="term reveal">
-    <div class="term-bar"><i></i><i></i><i></i><span style="margin-left:10px">sgl-project/sglang-omni · issue #478</span></div>
-    <div class="term-body">
-      <div class="grp">## Foundation</div>
-      <div class="it"><span class="bx">[x]</span><span>Model support — arch + weights on HF (boson-sglang/higgs-audio-v3-generation-4B-base)</span><a href="https://github.com/sgl-project/sglang-omni/pull/428" target="_blank">#428</a></div>
-      <div class="it"><span class="bx">[x]</span><span>Radix cache — extra_key namespacing per reference audio</span></div>
-      <div class="it"><span class="bx">[x]</span><span>Reuse OmniScheduler, drop custom HiggsScheduler</span><a href="https://github.com/sgl-project/sglang-omni/pull/476" target="_blank">#476</a></div>
-      <div class="grp">## Encoder</div>
-      <div class="it"><span class="bx">[x]</span><span>Fuse preprocessing into encoder stage</span><a href="https://github.com/sgl-project/sglang-omni/issues/576" target="_blank">#576</a></div>
-      <div class="it"><span class="bx">[x]</span><span>LRU cache for audio encoder</span><a href="https://github.com/sgl-project/sglang-omni/issues/562" target="_blank">#562</a><a href="https://github.com/sgl-project/sglang-omni/pull/563" target="_blank">#563</a><a href="https://github.com/sgl-project/sglang-omni/pull/605" target="_blank">#605</a></div>
-      <div class="it"><span class="bx">[x]</span><span>Batched encoder (demoted to offline warmup)</span><a href="https://github.com/sgl-project/sglang-omni/issues/603" target="_blank">#603</a><a href="https://github.com/sgl-project/sglang-omni/pull/610" target="_blank">#610</a></div>
-      <div class="it"><span class="bx">[x]</span><span>Encoder torch.compile</span><a href="https://github.com/sgl-project/sglang-omni/pull/612" target="_blank">#612</a></div>
-      <div class="it todo"><span class="bx">[ ]</span><span>Encoder CUDA graph</span></div>
-      <div class="grp">## AR Step</div>
-      <div class="it"><span class="bx">[x]</span><span>CUDA graph acceleration of the decode loop</span><a href="https://github.com/sgl-project/sglang-omni/pull/503" target="_blank">#503</a></div>
-      <div class="it"><span class="bx">[x]</span><span>Batch 3 per-step D2H syncs into 1 (_collect_step_outputs_cg)</span><a href="https://github.com/sgl-project/sglang-omni/issues/564" target="_blank">#564</a><a href="https://github.com/sgl-project/sglang-omni/pull/572" target="_blank">#572</a></div>
-      <div class="it"><span class="bx">[x]</span><span>Async one-step-lookahead decode for the omni AR loop</span><a href="https://github.com/sgl-project/sglang-omni/pull/590" target="_blank">#590</a></div>
-      <div class="it"><span class="bx">[x]</span><span>torch.compile — evaluated, then removed from the backbone</span><a href="https://github.com/sgl-project/sglang-omni/issues/565" target="_blank">#565</a><a href="https://github.com/sgl-project/sglang-omni/pull/579" target="_blank">#579</a></div>
-      <div class="it bug"><span class="bx">[!]</span><span>Catastrophic WER outliers at CG batch ≥ 16 (99–100% vs 0.1–0.4% baseline) — upstream sglang × Inductor capture interaction; capped _compiled_max_decode_bs=12</span><a href="https://github.com/sgl-project/sglang-omni/issues/578" target="_blank">#578</a></div>
-      <div class="grp">## Vocoder + Streaming</div>
-      <div class="it"><span class="bx">[x]</span><span>Batched vocoder decode</span><a href="https://github.com/sgl-project/sglang-omni/issues/569" target="_blank">#569</a><a href="https://github.com/sgl-project/sglang-omni/pull/574" target="_blank">#574</a></div>
-      <div class="it"><span class="bx">[x]</span><span>Windowed streaming vocoder</span><a href="https://github.com/sgl-project/sglang-omni/pull/597" target="_blank">#597</a><a href="https://github.com/sgl-project/sglang-omni/pull/614" target="_blank">#614</a></div>
-      <div class="grp">## Evaluation &amp; Benchmark</div>
-      <div class="it"><span class="bx">[x]</span><span>E2E profile and benchmark harness</span><a href="https://github.com/sgl-project/sglang-omni/pull/534" target="_blank">#534</a></div>
-      <div class="it"><span class="bx">[x]</span><span>Seed-TTS speaker-similarity benchmark + text normalization (everything matched)</span><a href="https://github.com/sgl-project/sglang-omni/pull/469" target="_blank">#469</a></div>
-      <div class="it"><span class="bx">[x]</span><span>Cross-hardware benchmarks — H100, H200</span></div>
+  <div class="demo-shell reveal">
+    <div class="demo-bar"><i></i><i></i><i></i><span style="margin-left:10px">POST /v1/audio/speech · model: higgs-audio-v3-tts</span></div>
+    <div class="demo-body">
+      <div class="d-row">
+        <div class="d-label"><span>API KEY</span><span class="hint">paste a key, or open this page with ?key=… in the URL — stored only in your browser</span></div>
+        <input type="password" id="apiKey" autocomplete="off" spellcheck="false">
+      </div>
+      <div class="d-row">
+        <div class="d-label"><span>STEP 1 · REFERENCE VOICE</span><span class="hint">3–15s of speech works best · skip to use the default voice</span></div>
+        <div class="btn-row">
+          <button class="btn rec" id="recBtn">● RECORD MIC</button>
+          <div class="rec-meter" id="recMeter" style="display:none"></div>
+          <span class="mono" id="recTime" style="font-size:12px;color:var(--paper-faint)"></span>
+          <button class="btn" id="clearRec" style="display:none">✕ CLEAR</button>
+        </div>
+        <audio id="refPlayer" controls style="display:none"></audio>
+      </div>
+      <div class="d-row">
+        <div class="d-label"><span>STEP 2 · TEXT TO SPEAK</span></div>
+        <textarea id="ttsText">Hello! This is my voice, cloned by Higgs Audio v3 and served by SGLang-Omni. The streaming version of this sentence started playing before the non-streaming one even finished generating.</textarea>
+      </div>
+      <div class="d-row">
+        <div class="d-label"><span>STEP 3 · GENERATE — RACE THE TWO PATHS</span></div>
+        <div class="btn-row">
+          <button class="btn blue" id="genNon">⬇ NON-STREAMING (MP3)</button>
+          <button class="btn primary" id="genStr">▶ STREAMING (PCM)</button>
+          <button class="btn" id="stopStr" style="display:none">■ STOP</button>
+        </div>
+        <div class="d-status" id="status"></div>
+        <div class="metric-grid">
+          <div class="metric">
+            <h6>NON-STREAMING</h6>
+            <div class="mv"><span class="lbl">first audio&nbsp;&nbsp;</span><b id="nsFirst">—</b><br><span class="lbl">complete&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span><b id="nsTotal">—</b></div>
+            <audio id="nsPlayer" controls style="display:none"></audio>
+          </div>
+          <div class="metric">
+            <h6>STREAMING (24kHz PCM)</h6>
+            <div class="mv"><span class="lbl">first audio&nbsp;&nbsp;</span><b id="stFirst">—</b><br><span class="lbl">complete&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span><b id="stTotal">—</b></div>
+            <div class="rec-meter" id="playMeter" style="margin-top:12px"></div>
+          </div>
+        </div>
+      </div>
     </div>
+    <div class="demo-foot">// audio is sent to the Boson AI API for synthesis and not stored by this page · mic access stays in your browser</div>
   </div>
-  <p class="tbl-note reveal" style="margin-top:18px">// Guardrail worth noting: every optimization shipped against the goal "no model performance reduction" — speed was never traded for WER.</p>
 </section>
 
-<!-- ================= 05 BENCH ================= -->
+<!-- ================= 06 BENCH ================= -->
 <section id="bench">
-  <div class="sec-head reveal"><span class="no">05</span><h2>Measured: One H100</h2></div>
+  <div class="sec-head reveal"><span class="no">06</span><h2>Overall Performance: One H100</h2></div>
   <p class="sec-lede reveal">Full Seed-TTS EN set (N=1088, mean of 3 runs), bf16 + CUDA graph, <code>max_running_requests=16</code>. RTF &lt; 1 means faster than real time.</p>
   <div class="bench-wrap">
     <div class="reveal">
@@ -759,7 +837,7 @@ footer.site .sig{font-family:var(--mono);font-size:11px;letter-spacing:.15em;tex
           <tr><td>16</td><td>14.74</td><td>1079 ms</td><td>0.262</td><td>61.84</td></tr>
         </tbody>
       </table>
-      <p class="tbl-note">// 9× the audio throughput from 1→16 concurrency, while per-request latency grows only 1.7×.</p>
+      <p class="tbl-note">// 9× the audio throughput from 1→16 concurrency while per-request latency grows only 1.7× — the multi-stage async pipeline absorbing load.</p>
     </div>
     <div class="reveal" style="transition-delay:.15s">
       <div class="bars-title">AUDIO THROUGHPUT — SECONDS OF AUDIO PRODUCED PER SECOND</div>
@@ -781,43 +859,6 @@ footer.site .sig{font-family:var(--mono);font-size:11px;letter-spacing:.15em;tex
     </div>
     <p class="tbl-note" style="margin-top:16px">// Plus inline control tags: 20+ emotions, styles (singing, whispering, shouting), prosody (speed, pitch, pauses), and sound events (laughter, sigh, cough) — all composable.</p>
   </div>
-</section>
-
-<!-- ================= 06 LESSONS ================= -->
-<section id="lessons">
-  <div class="sec-head reveal"><span class="no">06</span><h2>Six Engineering Lessons</h2></div>
-  <div class="lesson-list">
-    <div class="lesson reveal">
-      <div class="ln">01</div>
-      <div><h3>Profile before you cut</h3>
-      <p>The bottleneck was never the big forward pass — it was tens of microseconds of launch and sync overhead <b>amplified by hundreds of steps</b>. Intuition lies; the profiler doesn't.</p></div>
-    </div>
-    <div class="lesson reveal">
-      <div class="ln">02</div>
-      <div><h3>Attack each layer with its own weapon</h3>
-      <p>The encoder <b>eliminates compute</b> (LRU cache), the AR engine <b>eliminates overhead</b> (CUDA graphs + merged syncs + async lookahead), the vocoder <b>eliminates queueing</b> (batching + windowing). One diagnosis per stage, one cure per stage.</p></div>
-    </div>
-    <div class="lesson reveal">
-      <div class="ln">03</div>
-      <div><h3>Respect the domain</h3>
-      <p>Audio is not text: delay-pattern state machines, seam clicks at chunk boundaries, noise from incomplete codebook rows. Optimizations must be <b>built for the signal</b> — naively porting LLM tricks causes acoustic accidents.</p></div>
-    </div>
-    <div class="lesson reveal">
-      <div class="ln">04</div>
-      <div><h3>Dare to remove things</h3>
-      <p>Online batched encoding was demoted; backbone torch.compile was deleted. Both calls were made on <b>production measurements</b>, not paper gains. Deleted code is an optimization too.</p></div>
-    </div>
-    <div class="lesson reveal">
-      <div class="ln">05</div>
-      <div><h3>Hold the quality line</h3>
-      <p>The roadmap's stated goal: low latency and high throughput with <b>no model performance reduction</b>. When CG batch ≥ 16 with compile drove WER from 0.4% to 100%, the team capped batch size rather than ship the speed. Correctness bugs in audio don't crash — they speak gibberish.</p></div>
-    </div>
-    <div class="lesson reveal">
-      <div class="ln">06</div>
-      <div><h3>Crystallize into a framework</h3>
-      <p>The endgame is generalization: SGLang-Omni turns per-model surgery into <b>declare a topology + plug in hooks</b>. The same machinery now serves Fish Audio S2-Pro, Qwen3-TTS, MOSS-TTS, Qwen3-Omni, and more.</p></div>
-    </div>
-  </div>
 
   <blockquote class="reveal">
     "The best system optimizations come not from blindly applying popular techniques,<br>
@@ -833,26 +874,24 @@ footer.site .sig{font-family:var(--mono);font-size:11px;letter-spacing:.15em;tex
     <a href="https://github.com/zhaochenyang20/Awesome-ML-SYS-Tutorial/blob/main/sglang/sglang-omni/tts-optimization.md" target="_blank">① Awesome-ML-SYS-Tutorial · TTS Optimization engineering notes</a>
     <a href="https://www.lmsys.org/blog/2026-06-04-higgs-audio-v3-tts/" target="_blank">② LMSYS Blog · Higgs Audio v3 TTS on SGLang-Omni (2026-06-04)</a>
     <a href="https://github.com/sgl-project/sglang-omni/issues/478" target="_blank">③ sglang-omni #478 · Higgs Audio TTS Performance Optimization Roadmap</a>
+    <a href="https://bosonai.mintlify.app/api-reference/text-to-speech/create-speech" target="_blank">④ Boson AI API Reference · Create Speech</a>
   </div>
   <div class="sig">BOSON AI × SGLANG-OMNI<br>RTF 0.147 · H100 ×1 · 2026</div>
 </footer>
 
 <script>
-// hero waveform bars
+/* ============ decorative ============ */
 (function(){
   const c=document.getElementById('waveBars');
   const n=Math.min(120,Math.floor(window.innerWidth/11));
   for(let i=0;i<n;i++){
     const b=document.createElement('i');
-    const h=18+Math.abs(Math.sin(i*.32))*62+Math.random()*18;
-    b.style.height=h+'px';
+    b.style.height=(18+Math.abs(Math.sin(i*.32))*62+Math.random()*18)+'px';
     b.style.animationDelay=(i*.045)+'s';
     b.style.animationDuration=(1.2+Math.random()*1.2)+'s';
     c.appendChild(b);
   }
 })();
-
-// delay-pattern grid: 8 codebooks × 12 steps, codebook i activates at step i
 (function(){
   const g=document.getElementById('delayGrid');
   const COLS=12;
@@ -863,14 +902,11 @@ footer.site .sig{font-family:var(--mono);font-size:11px;letter-spacing:.15em;tex
     for(let t=0;t<COLS;t++){
       const on=t>=cb;
       const cls=on?(cb===0?'cell first':'cell on'):'cell';
-      const d=(cb*0.06+t*0.05).toFixed(2);
-      h+='<span class="'+cls+'" style="animation-delay:'+d+'s"></span>';
+      h+='<span class="'+cls+'" style="animation-delay:'+(cb*0.06+t*0.05).toFixed(2)+'s"></span>';
     }
   }
   g.innerHTML=h;
 })();
-
-// scroll reveal + bar fills
 (function(){
   const io=new IntersectionObserver(es=>{
     es.forEach(e=>{
@@ -882,6 +918,163 @@ footer.site .sig{font-family:var(--mono);font-size:11px;letter-spacing:.15em;tex
     });
   },{threshold:.12});
   document.querySelectorAll('.reveal').forEach(el=>io.observe(el));
+})();
+
+/* ============ live demo ============ */
+(function(){
+  const API_URL='https://api.boson.ai/v1/audio/speech';
+  const SAMPLE_RATE=24000;
+  const $=id=>document.getElementById(id);
+  const keyEl=$('apiKey'),status=$('status');
+  // key sources, in priority order: ?key= URL param > localStorage > manual paste.
+  // The key is deliberately NOT embedded in this public page's source.
+  const urlKey=new URLSearchParams(location.search).get('key');
+  if(urlKey){localStorage.setItem('boson_key',urlKey);history.replaceState(null,'',location.pathname+location.hash)}
+  keyEl.value=urlKey||localStorage.getItem('boson_key')||'';
+  keyEl.placeholder='bai-…  (paste a Boson AI API key, or open this page with ?key=…)';
+  keyEl.addEventListener('change',()=>localStorage.setItem('boson_key',keyEl.value.trim()));
+  function say(msg,cls){status.innerHTML=cls?('<span class="'+cls+'">'+msg+'</span>'):msg}
+  const fmt=ms=>ms<1000?Math.round(ms)+' ms':(ms/1000).toFixed(2)+' s';
+
+  /* ---- mic recording → WAV data URI ---- */
+  let mediaRecorder=null,chunks=[],refDataUri=null,recStart=0,recTimer=null,meterRAF=null;
+  const recBtn=$('recBtn'),recTime=$('recTime'),clearRec=$('clearRec'),refPlayer=$('refPlayer'),recMeter=$('recMeter');
+  for(let i=0;i<24;i++){const b=document.createElement('i');recMeter.appendChild(b)}
+
+  function encodeWav(audioBuffer){
+    const ch=audioBuffer.getChannelData(0),sr=audioBuffer.sampleRate,len=ch.length;
+    const buf=new ArrayBuffer(44+len*2),v=new DataView(buf);
+    const ws=(o,s)=>{for(let i=0;i<s.length;i++)v.setUint8(o+i,s.charCodeAt(i))};
+    ws(0,'RIFF');v.setUint32(4,36+len*2,true);ws(8,'WAVE');ws(12,'fmt ');
+    v.setUint32(16,16,true);v.setUint16(20,1,true);v.setUint16(22,1,true);
+    v.setUint32(24,sr,true);v.setUint32(28,sr*2,true);v.setUint16(32,2,true);v.setUint16(34,16,true);
+    ws(36,'data');v.setUint32(40,len*2,true);
+    for(let i=0;i<len;i++){const s=Math.max(-1,Math.min(1,ch[i]));v.setInt16(44+i*2,s<0?s*0x8000:s*0x7FFF,true)}
+    return new Blob([buf],{type:'audio/wav'});
+  }
+  function blobToDataUri(blob){return new Promise(r=>{const fr=new FileReader();fr.onload=()=>r(fr.result);fr.readAsDataURL(blob)})}
+
+  recBtn.addEventListener('click',async()=>{
+    if(mediaRecorder&&mediaRecorder.state==='recording'){mediaRecorder.stop();return}
+    try{
+      const stream=await navigator.mediaDevices.getUserMedia({audio:true});
+      chunks=[];mediaRecorder=new MediaRecorder(stream);
+      const ac=new (window.AudioContext||window.webkitAudioContext)();
+      const src=ac.createMediaStreamSource(stream),an=ac.createAnalyser();an.fftSize=64;src.connect(an);
+      const data=new Uint8Array(an.frequencyBinCount),bars=recMeter.children;
+      recMeter.style.display='flex';
+      (function loop(){an.getByteFrequencyData(data);for(let i=0;i<bars.length;i++){bars[i].style.height=Math.max(4,(data[i]||0)/255*32)+'px'}meterRAF=requestAnimationFrame(loop)})();
+      mediaRecorder.ondataavailable=e=>chunks.push(e.data);
+      mediaRecorder.onstop=async()=>{
+        cancelAnimationFrame(meterRAF);recMeter.style.display='none';clearInterval(recTimer);
+        stream.getTracks().forEach(t=>t.stop());ac.close();
+        const blob=new Blob(chunks,{type:mediaRecorder.mimeType});
+        const ab=await blob.arrayBuffer();
+        const dac=new (window.AudioContext||window.webkitAudioContext)();
+        const decoded=await dac.decodeAudioData(ab);dac.close();
+        const wav=encodeWav(decoded);
+        refDataUri=await blobToDataUri(wav);
+        refPlayer.src=URL.createObjectURL(wav);refPlayer.style.display='block';
+        clearRec.style.display='inline-flex';
+        recBtn.textContent='● RE-RECORD';recBtn.classList.remove('recording');
+        recTime.textContent=decoded.duration.toFixed(1)+'s captured · '+(wav.size/1024).toFixed(0)+' KB wav';
+        say('Reference voice ready — it will be sent as <span class="mono">ref_audio</span>.','ok');
+      };
+      mediaRecorder.start();recStart=performance.now();
+      recBtn.textContent='■ STOP';recBtn.classList.add('recording');
+      recTimer=setInterval(()=>{
+        const s=(performance.now()-recStart)/1000;
+        recTime.textContent=s.toFixed(1)+'s';
+        if(s>=20)mediaRecorder.stop();
+      },100);
+    }catch(e){say('Microphone unavailable: '+e.message,'err')}
+  });
+  clearRec.addEventListener('click',()=>{
+    refDataUri=null;refPlayer.style.display='none';clearRec.style.display='none';
+    recBtn.textContent='● RECORD MIC';recTime.textContent='';say('Cleared — the default voice will be used.');
+  });
+
+  function buildBody(extra){
+    const body={input:$('ttsText').value.trim(),model:'higgs-audio-v3-tts',...extra};
+    if(refDataUri)body.ref_audio=refDataUri;
+    return body;
+  }
+  function guard(){
+    if(!$('ttsText').value.trim()){say('Type some text first.','err');return false}
+    if(!keyEl.value.trim()){say('An API key is required.','err');return false}
+    return true;
+  }
+
+  /* ---- non-streaming ---- */
+  $('genNon').addEventListener('click',async()=>{
+    if(!guard())return;
+    const btn=$('genNon');btn.disabled=true;
+    $('nsFirst').textContent='…';$('nsTotal').textContent='…';
+    say('Non-streaming: waiting for the complete MP3…');
+    const t0=performance.now();
+    try{
+      const r=await fetch(API_URL,{method:'POST',
+        headers:{'Authorization':'Bearer '+keyEl.value.trim(),'Content-Type':'application/json'},
+        body:JSON.stringify(buildBody({response_format:'mp3'}))});
+      if(!r.ok)throw new Error('HTTP '+r.status+' — '+(await r.text()).slice(0,200));
+      const blob=await r.blob();
+      const total=performance.now()-t0;
+      $('nsTotal').textContent=fmt(total);$('nsFirst').textContent=fmt(total)+' (= complete)';
+      const p=$('nsPlayer');p.src=URL.createObjectURL(blob);p.style.display='block';p.play();
+      say('Non-streaming done in <b>'+fmt(total)+'</b> — nothing was playable before that.','ok');
+    }catch(e){say('Non-streaming failed: '+e.message,'err');$('nsFirst').textContent='—';$('nsTotal').textContent='—'}
+    btn.disabled=false;
+  });
+
+  /* ---- streaming PCM ---- */
+  let stopFlag=false,playCtx=null;
+  const playMeter=$('playMeter');for(let i=0;i<24;i++){const b=document.createElement('i');playMeter.appendChild(b)}
+  $('stopStr').addEventListener('click',()=>{stopFlag=true});
+  $('genStr').addEventListener('click',async()=>{
+    if(!guard())return;
+    const btn=$('genStr');btn.disabled=true;$('stopStr').style.display='inline-flex';stopFlag=false;
+    $('stFirst').textContent='…';$('stTotal').textContent='…';
+    say('Streaming: PCM chunks play as they arrive…');
+    const t0=performance.now();let firstAt=null;
+    try{
+      const r=await fetch(API_URL,{method:'POST',
+        headers:{'Authorization':'Bearer '+keyEl.value.trim(),'Content-Type':'application/json'},
+        body:JSON.stringify(buildBody({response_format:'pcm',stream:true}))});
+      if(!r.ok)throw new Error('HTTP '+r.status+' — '+(await r.text()).slice(0,200));
+      playCtx=new (window.AudioContext||window.webkitAudioContext)({sampleRate:SAMPLE_RATE});
+      const an=playCtx.createAnalyser();an.fftSize=64;an.connect(playCtx.destination);
+      const vis=new Uint8Array(an.frequencyBinCount),bars=playMeter.children;
+      let visRAF;(function vloop(){an.getByteTimeDomainData(vis);for(let i=0;i<bars.length;i++){bars[i].style.height=Math.max(4,Math.abs((vis[i]||128)-128)/128*64)+'px'}visRAF=requestAnimationFrame(vloop)})();
+      const reader=r.body.getReader();
+      let nextTime=playCtx.currentTime+0.08,leftover=new Uint8Array(0);
+      while(true){
+        const {done,value}=await reader.read();
+        if(done||stopFlag)break;
+        let bytes=new Uint8Array(leftover.length+value.length);
+        bytes.set(leftover);bytes.set(value,leftover.length);
+        const usable=bytes.length-(bytes.length%2);
+        leftover=bytes.slice(usable);
+        if(!usable)continue;
+        const i16=new Int16Array(bytes.buffer.slice(0,usable));
+        const f32=new Float32Array(i16.length);
+        for(let i=0;i<i16.length;i++)f32[i]=i16[i]/32768;
+        const ab=playCtx.createBuffer(1,f32.length,SAMPLE_RATE);
+        ab.getChannelData(0).set(f32);
+        const src=playCtx.createBufferSource();src.buffer=ab;src.connect(an);
+        if(nextTime<playCtx.currentTime)nextTime=playCtx.currentTime+0.02;
+        src.start(nextTime);nextTime+=ab.duration;
+        if(firstAt===null){firstAt=performance.now()-t0;$('stFirst').textContent=fmt(firstAt)}
+      }
+      if(stopFlag)reader.cancel().catch(()=>{});
+      const total=performance.now()-t0;
+      $('stTotal').textContent=fmt(total);
+      const drain=Math.max(0,(nextTime-playCtx.currentTime)*1000)+200;
+      setTimeout(()=>{cancelAnimationFrame(visRAF);if(playCtx)playCtx.close();playCtx=null;
+        for(const b of bars)b.style.height='4px'},drain);
+      say(stopFlag?'Streaming stopped.':('Streaming: first audio at <b>'+fmt(firstAt||total)+'</b>, fully received in <b>'+fmt(total)+'</b>.'),'ok');
+    }catch(e){say('Streaming failed: '+e.message,'err');$('stFirst').textContent='—';$('stTotal').textContent='—';if(playCtx){playCtx.close();playCtx=null}}
+    btn.disabled=false;$('stopStr').style.display='none';
+  });
 })();
 </script>
 </body>

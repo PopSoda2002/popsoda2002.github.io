@@ -6,42 +6,42 @@
 <title>PopSoda · Notes</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=ZCOOL+QingKe+HuangYou&family=Noto+Sans+SC:wght@300;400;500&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Marcellus&family=Plus+Jakarta+Sans:wght@300;400;500&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
 :root{
-  --ink:#07090d;--ink-2:#0c1016;--line:#1e2734;
-  --paper:#e8e3d8;--paper-dim:#9aa3ad;--paper-faint:#5d6671;
-  --amber:#ffb454;--teal:#3ddbc9;--teal-deep:#1a9e90;
+  --ink:#0E1214;--ink-2:#181818;--ink-3:#191D1F;--line:#252525;
+  --paper:#ffffff;--paper-dim:#9aa3b2;--paper-faint:#888888;
+  --green:#07C400;--green-soft:#C7FFC5;--blue:#60A5FA;
 }
 *{margin:0;padding:0;box-sizing:border-box}
-::selection{background:var(--amber);color:var(--ink)}
+::selection{background:var(--green);color:var(--ink)}
 body{
-  background:var(--ink);color:var(--paper);
-  font-family:'Noto Sans SC',sans-serif;font-weight:300;line-height:1.8;
+  background:var(--ink);color:#D6D3D1;
+  font-family:'Plus Jakarta Sans',sans-serif;font-weight:300;line-height:1.8;
   min-height:100vh;display:flex;flex-direction:column;
   padding:12vh 8vw 8vh;
 }
 body::after{
-  content:"";position:fixed;inset:0;pointer-events:none;opacity:.05;
+  content:"";position:fixed;inset:0;pointer-events:none;opacity:.04;
   background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
 }
-.kicker{font-family:'IBM Plex Mono',monospace;font-size:12px;letter-spacing:.35em;color:var(--teal);margin-bottom:24px;display:flex;align-items:center;gap:14px}
-.kicker::before{content:"";width:42px;height:1px;background:var(--teal-deep)}
-h1{font-family:'ZCOOL QingKe HuangYou',sans-serif;font-weight:400;font-size:clamp(44px,8vw,92px);letter-spacing:.03em;line-height:1.1}
-h1 span{color:var(--amber)}
+.kicker{font-family:'IBM Plex Mono',monospace;font-size:12px;letter-spacing:.35em;color:var(--green);margin-bottom:24px;display:flex;align-items:center;gap:14px}
+.kicker::before{content:"";width:42px;height:1px;background:var(--green)}
+h1{font-family:'Marcellus',serif;font-weight:400;font-size:clamp(40px,7vw,84px);line-height:1.12;color:var(--paper)}
+h1 span{color:var(--green-soft)}
 .sub{color:var(--paper-dim);max-width:520px;margin-top:18px;font-size:15px}
-.posts{margin-top:72px;border-top:1px solid var(--line);max-width:860px}
+.posts{margin-top:72px;border-top:1px solid var(--line);max-width:900px}
 .post{
   display:flex;align-items:baseline;gap:26px;padding:30px 6px;
   border-bottom:1px solid var(--line);text-decoration:none;color:inherit;
   transition:background .25s,padding-left .25s;
 }
-.post:hover{background:var(--ink-2);padding-left:18px}
+.post:hover{background:var(--ink-3);padding-left:18px}
 .post .date{font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--paper-faint);white-space:nowrap}
-.post .t{font-family:'ZCOOL QingKe HuangYou',sans-serif;font-size:24px;letter-spacing:.03em}
-.post:hover .t{color:var(--amber)}
-.post .d{font-size:13px;color:var(--paper-dim);margin-left:auto;text-align:right;max-width:300px}
-.post .arrow{color:var(--teal);font-family:'IBM Plex Mono',monospace}
+.post .t{font-family:'Marcellus',serif;font-size:23px;color:var(--paper)}
+.post:hover .t{color:var(--green-soft)}
+.post .d{font-size:13px;color:var(--paper-dim);margin-left:auto;text-align:right;max-width:320px}
+.post .arrow{color:var(--blue);font-family:'IBM Plex Mono',monospace}
 footer{margin-top:auto;padding-top:80px;font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:.18em;color:var(--paper-faint)}
 @media(max-width:680px){.post{flex-wrap:wrap;gap:8px 18px}.post .d{margin-left:0;text-align:left;max-width:none}}
 </style>
@@ -54,7 +54,7 @@ footer{margin-top:auto;padding-top:80px;font-family:'IBM Plex Mono',monospace;fo
     <a class="post" href="./tts-optimization.html">
       <span class="date">2026-06</span>
       <span class="t">The Microsecond War: Optimizing Higgs Audio v3 TTS</span>
-      <span class="d">Four-stage pipeline · CUDA graphs · windowed streaming vocoder · measured on one H100</span>
+      <span class="d">TTS ≠ LLM · multi-stage async · CUDA graphs · streaming vocoder · live voice-cloning demo</span>
       <span class="arrow">→</span>
     </a>
   </div>
