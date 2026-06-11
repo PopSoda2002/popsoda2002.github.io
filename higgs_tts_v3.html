@@ -678,7 +678,7 @@ footer.site .sig{font-family:var(--mono);font-size:11px;letter-spacing:.15em;tex
     <div class="benefit reveal">
       <div class="bi">BENEFIT / 01</div>
       <h4>Right scheduler per stage</h4>
-      <p>The AR stage runs <code>OmniScheduler</code> with SGLang's continuous batching, KV-cache management and CUDA graph support; encoder and aggregator use a lean <code>SimpleScheduler</code>; streaming stages get <code>StreamingSimpleScheduler</code>.</p>
+      <p>The AR stage runs <code>OmniScheduler</code> with SGLang's continuous batching, KV cache and CUDA graphs; preprocessing gets a <code>ThreadedSimpleScheduler</code> thread pool; the encoder a single-threaded <code>SimpleScheduler</code>; the vocoder a <code>StreamingVocoderScheduler</code>.</p>
     </div>
     <div class="benefit reveal" style="transition-delay:.1s">
       <div class="bi">BENEFIT / 02</div>
@@ -707,7 +707,7 @@ footer.site .sig{font-family:var(--mono);font-size:11px;letter-spacing:.15em;tex
         <h3>1 · Preprocessing</h3>
         <p>Tokenizes text, loads the reference audio. Negligible FLOPs — but every stage hop costs a queue and a serialization boundary.</p>
         <span class="mono-note">text + ref audio → tensors</span>
-        <div class="opts"><span>CPU SimpleScheduler</span></div>
+        <div class="opts"><span>ThreadedSimpleScheduler</span></div>
       </div>
       <div class="node">
         <span class="tag gpu">GPU · STATIC COMPUTE</span>
@@ -759,23 +759,23 @@ footer.site .sig{font-family:var(--mono);font-size:11px;letter-spacing:.15em;tex
   <!-- PREPROCESSING -->
   <div class="dive reveal">
     <div class="dive-head"><span class="sno">A</span><h3>Preprocessing <span class="en">— CPU work gets a CPU scheduler</span></h3></div>
-    <div class="dive-meta">CPU · tokenization + reference-audio I/O · SimpleScheduler</div>
+    <div class="dive-meta">CPU · tokenization + reference-audio I/O · ThreadedSimpleScheduler</div>
     <div class="dive-grid">
       <div class="dive-what"><div class="dw-text">
         <p>Tokenize text, load and decode the reference audio. Pure <b>CPU + I/O work</b> — it needs none of the GPU scheduler's machinery (batching, KV cache, CUDA graphs).</p>
-        <p>So it runs under a lean CPU-side <code>SimpleScheduler</code>: the CPU preps the next requests while the GPU stages work on earlier ones.</p>
+        <p>So it runs under a CPU-side <code>ThreadedSimpleScheduler</code> — a thread pool (<code>max_concurrency</code>) that preprocesses several requests in parallel while the GPU stages work on earlier ones.</p>
         </div>
         <div class="spec">
           <span class="sl">work</span> &nbsp;text → token ids · audio file → waveform tensor<br>
           <span class="sl">cost</span> &nbsp;I/O-bound, negligible FLOPs<br>
-          <span class="sl">scheduler</span> &nbsp;<b>SimpleScheduler</b> on CPU — no GPU machinery
+          <span class="sl">scheduler</span> &nbsp;<b>ThreadedSimpleScheduler</b> — CPU thread pool, no GPU machinery
         </div>
       </div>
       <div class="moves">
         <div class="move">
           <div class="m-name"><span class="mk">SCHED</span>Pipelined off the GPU's critical path</div>
           <div class="tl" id="tlPre"></div>
-          <p class="fig-cap">While the GPU serves request 1, the CPU is already preprocessing requests 2 and 3 — <b>the GPU never waits on I/O</b>.</p>
+          <p class="fig-cap">The thread pool preprocesses requests in parallel; while the GPU serves request 1, requests 2–4 are already prepped — <b>the GPU never waits on I/O</b>.</p>
         </div>
       </div>
     </div>
@@ -1100,8 +1100,9 @@ tlMake('tlAsync',{period:9,lanes:[
 
 /* 04A — preprocessing: CPU scheduler pipelines off the GPU path */
 tlMake('tlPre',{period:8,lanes:[
-  {label:'CPU · preprocess',segs:[{t0:.02,t1:.16,cls:'c-cpu',label:'req 1'},{t0:.18,t1:.32,cls:'c-cpu',label:'req 2'},{t0:.34,t1:.48,cls:'c-cpu',label:'req 3'}]},
-  {label:'GPU · enc + AR',segs:[{t0:.16,t1:.24,cls:'c-enc'},{t0:.24,t1:.52,cls:'c-ar',label:'req 1'},{t0:.52,t1:.60,cls:'c-enc'},{t0:.60,t1:.88,cls:'c-ar',label:'req 2'}],marks:[{t:.52,html:'req 2 ready before the GPU asks'}]}
+  {label:'CPU thread 1',segs:[{t0:.02,t1:.18,cls:'c-cpu',label:'req 1'},{t0:.20,t1:.36,cls:'c-cpu',label:'req 3'}]},
+  {label:'CPU thread 2',segs:[{t0:.04,t1:.20,cls:'c-cpu',label:'req 2'},{t0:.22,t1:.38,cls:'c-cpu',label:'req 4'}]},
+  {label:'GPU · enc + AR',segs:[{t0:.18,t1:.26,cls:'c-enc'},{t0:.26,t1:.52,cls:'c-ar',label:'req 1'},{t0:.52,t1:.60,cls:'c-enc'},{t0:.60,t1:.86,cls:'c-ar',label:'req 2'}],marks:[{t:.52,html:'next request always ready'}]}
 ]});
 
 /* 04A — encoder torch.compile: kernel fusion */
