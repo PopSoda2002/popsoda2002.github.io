@@ -600,9 +600,8 @@ footer.site .sig{font-family:var(--mono);font-size:11px;letter-spacing:.15em;tex
 <section id="vs">
   <div class="sec-head reveal"><span class="no">01</span><h2>SGLang vs SGLang-Omni: TTS Is Not an LLM</h2></div>
   <p class="sec-lede reveal">
-    SGLang serves one model with one compute pattern: a transformer that eats tokens and emits tokens.
-    Higgs Audio v3 has that transformer inside it — but wrapped in a neural audio codec, a multi-codebook
-    delay schedule, and a waveform decoder. <b>Same backbone, completely different serving problem.</b>
+    Same Qwen3 backbone inside — but wrapped in a neural codec, a multi-codebook delay schedule,
+    and a waveform decoder. <b>A completely different serving problem.</b>
   </p>
   <div class="vs-grid reveal">
     <div class="vs-col llm">
@@ -652,9 +651,8 @@ footer.site .sig{font-family:var(--mono);font-size:11px;letter-spacing:.15em;tex
     </div>
   </div>
   <div class="vs-verdict reveal">
-    <b>The consequence:</b> you cannot serve this by bolting an encoder and a vocoder onto an LLM server's
-    request loop — the stages would serialize and fight for GPU memory. The fix is architectural:
-    make the stages first-class and run them <b>asynchronously</b>.
+    <b>The consequence:</b> bolting an encoder and vocoder onto an LLM server's request loop serializes
+    everything. The fix is architectural: first-class stages, run <b>asynchronously</b>.
   </div>
 </section>
 
@@ -662,8 +660,7 @@ footer.site .sig{font-family:var(--mono);font-size:11px;letter-spacing:.15em;tex
 <section id="async">
   <div class="sec-head reveal"><span class="no">02</span><h2>Why Multi-Stage Async Wins</h2></div>
   <p class="sec-lede reveal">
-    SGLang-Omni makes each stage an independent process with its own scheduler, connected by a
-    <b>Coordinator</b> over split control/data planes. Watch the same workload under both designs —
+    Each stage becomes an independent process with its own scheduler. Same workload, two designs —
     the playhead is wall-clock time.
   </p>
   <div class="reveal">
@@ -700,8 +697,7 @@ footer.site .sig{font-family:var(--mono);font-size:11px;letter-spacing:.15em;tex
 <section id="stages">
   <div class="sec-head reveal"><span class="no">03</span><h2>The Four Stages — and What Each One Got</h2></div>
   <p class="sec-lede reveal">
-    A request walks through four stations — follow the green pulse. Each station has a different job,
-    a different bottleneck, and got a different set of optimizations, detailed in the deep dives below.
+    Follow the green pulse: four stations, four different bottlenecks, four different cures.
   </p>
   <div class="pipe-wrap reveal">
     <div class="pipe-dot"></div>
@@ -756,8 +752,8 @@ footer.site .sig{font-family:var(--mono);font-size:11px;letter-spacing:.15em;tex
 <section id="dives">
   <div class="sec-head reveal"><span class="no">04</span><h2>Deep Dives, Stage by Stage</h2></div>
   <p class="sec-lede reveal">
-    Issue/PR numbers link to the public roadmap, <a href="https://github.com/sgl-project/sglang-omni/issues/478" target="_blank">sglang-omni #478</a> —
-    whose stated goal was <b>"low latency and high throughput with no model performance reduction."</b>
+    PR numbers link to the public roadmap, <a href="https://github.com/sgl-project/sglang-omni/issues/478" target="_blank">sglang-omni #478</a>:
+    <b>"low latency and high throughput with no model performance reduction."</b>
   </p>
 
   <!-- PREPROCESSING -->
@@ -766,9 +762,8 @@ footer.site .sig{font-family:var(--mono);font-size:11px;letter-spacing:.15em;tex
     <div class="dive-meta">CPU · tokenization + reference-audio I/O · fused into the encoder stage</div>
     <div class="dive-grid">
       <div class="dive-what"><div class="dw-text">
-        <p>The CPU-side stage: tokenize the input text, load the reference audio file, decode and resample it into a waveform tensor. Almost <b>zero FLOPs</b> — so why does it deserve a deep dive?</p>
-        <p>Because in a multi-stage pipeline its real cost isn't compute, it's the <b>stage hop</b>: every boundary a request crosses means serializing tensors, an IPC trip across the data plane, sitting in another queue, and another scheduling decision. At high QPS, hops add latency — and worse, <b>jitter</b>.</p>
-        <p>A stage this light can't justify its own hop. The optimization is structural: <b>delete the boundary</b>, not the work.</p>
+        <p>Tokenize text, load the reference audio. Almost <b>zero FLOPs</b> — the real cost is the <b>stage hop</b>: serialization, an IPC trip, a queue, a scheduling decision.</p>
+        <p>A stage this light can't justify its own hop. The fix is structural: <b>delete the boundary, not the work</b>.</p>
         </div>
         <div class="spec">
           <span class="sl">work</span> &nbsp;text → token ids · audio file → waveform tensor<br>
@@ -780,9 +775,9 @@ footer.site .sig{font-family:var(--mono);font-size:11px;letter-spacing:.15em;tex
       <div class="moves">
         <div class="move">
           <div class="m-name"><span class="mk">FUSE</span>Merge preprocessing into the encoder stage</div>
-          <p>Preprocessing now runs as the first step <b>inside</b> the encoder stage's process: same scheduler, same queue, no tensor serialization in between. One fewer coordinator hop for every single request.</p>
+          <p>Preprocessing now runs <b>inside</b> the encoder stage — one fewer hop for every request.</p>
           <div class="tl" id="tlPre"></div>
-          <p class="fig-cap">The red block is not compute — it's <b class="bad">serialization + queueing + scheduling</b> between two processes. Fusing the stages deletes it outright: encoding starts as soon as the waveform tensor exists.</p>
+          <p class="fig-cap">The red block is pure <b class="bad">serialization + queueing</b>, not compute. Fusion deletes it outright.</p>
           <div class="pr-row"><a class="pr" href="https://github.com/sgl-project/sglang-omni/issues/576" target="_blank">#576</a></div>
         </div>
       </div>
@@ -795,8 +790,7 @@ footer.site .sig{font-family:var(--mono);font-size:11px;letter-spacing:.15em;tex
     <div class="dive-meta">LRU cache · batched encoding · torch.compile</div>
     <div class="dive-grid">
       <div class="dive-what"><div class="dw-text">
-        <p>The encoder's profile: <b>expensive (50–100ms), deterministic, and repetitive</b>. The same reference voice produces the same tokens every time, and production users reuse a handful of voices across thousands of prompts. Most encoder work is recomputation of known answers.</p>
-        <p>So the order of attack: <b>skip it</b> (cache), <b>amortize it</b> (batch), <b>compile it</b> (a static convolutional graph — the one place torch.compile genuinely fits).</p>
+        <p>The encoder is <b>expensive (50–100ms), deterministic, and repetitive</b> — users reuse a handful of voices across thousands of prompts. Most encoder work is recomputation of known answers, so: <b>cache it</b>.</p>
         </div><div class="spec">
           <span class="sl">arch</span> &nbsp;DAC-style codec, weights shared with vocoder<br>
           <span class="sl">out</span> &nbsp;<b>[T, 8]</b> tokens → rearranged into delay pattern<br>
@@ -806,29 +800,12 @@ footer.site .sig{font-family:var(--mono);font-size:11px;letter-spacing:.15em;tex
       <div class="moves">
         <div class="move">
           <div class="m-name"><span class="mk">LRU</span>LRU cache keyed by reference audio</div>
-          <p>Seen this voice before? Skip the encoder entirely and return the precomputed delay tokens. Every hit saves 50–100ms of GPU time <b>and</b> keeps the GPU free for AR decode — a double win under load.</p>
+          <p>Seen this voice before? Return the precomputed tokens — 50–100ms saved per hit, and the GPU stays free for AR decode.</p>
           <div class="tl" id="tlLru"></div>
           <p class="fig-cap">Request 2 reuses voice A: the 80ms encode collapses to a <b>cache lookup</b>. Voice B misses and pays full price.</p>
           <div class="pr-row"><a class="pr" href="https://github.com/sgl-project/sglang-omni/issues/562" target="_blank">#562</a><a class="pr" href="https://github.com/sgl-project/sglang-omni/pull/563" target="_blank">#563</a><a class="pr" href="https://github.com/sgl-project/sglang-omni/pull/605" target="_blank">#605</a></div>
         </div>
-        <div class="move">
-          <div class="m-name"><span class="mk">BATCH</span>Batched encoder — real benefit, wrong place</div>
-          <p><b>What it is:</b> instead of encoding reference audios one at a time, collect several pending ones, group them into <b>length buckets</b> (so short clips aren't padded out to the longest), zero-pad within the bucket, and run one <code>[B, T]</code> forward. A convolutional codec at batch 1 leaves most of the GPU's SMs idle — batching fills them, and one kernel-launch sequence is amortized over B requests.</p>
-          <p><b>Is there a gain? Yes</b> — measured in isolation, per-audio encode cost drops markedly; that's why it was built (#603/#610). <b>But not online:</b> in the live server the encoder shares the GPU with 16 latency-critical AR decode loops. Batched encodes arrive as <b>bursts</b> that grab a large slice of SMs at once, and every burst showed up as a stall in someone's decode — per-encode throughput up, end-to-end tail latency worse.</p>
-          <p><b>Verdict:</b> keep the win where it's free. At server start, <b>offline warmup</b> batch-encodes the whole voice bank into the LRU cache at full batched speed — there's no competing traffic to hurt. The online path encodes one at a time, in isolation.</p>
-          <div class="tl" id="tlBatchBad"><div class="tl-title bad"><b>✕ ONLINE BATCHED ENCODE</b> — encode bursts steal SMs, AR loops stall</div></div>
-          <div class="tl" id="tlBatchGood"><div class="tl-title good"><b>✓ OFFLINE WARMUP</b> — same batched speed at startup, zero contention online</div></div>
-          <p class="fig-cap">Batching the encoder is a real optimization — for <b>throughput in isolation</b>. In a mixed pipeline, the latency-critical AR loops outrank it, so the batch win is harvested offline and the online path stays smooth.</p>
-          <div class="pr-row"><a class="pr" href="https://github.com/sgl-project/sglang-omni/issues/603" target="_blank">#603</a><a class="pr" href="https://github.com/sgl-project/sglang-omni/pull/610" target="_blank">#610</a></div>
         </div>
-        <div class="move">
-          <div class="m-name"><span class="mk">COMPILE</span>torch.compile on the encoder</div>
-          <p>Static shapes, a convolutional stack, no data-dependent branching — the textbook compile workload, and here it stays. (It did <b>not</b> survive on the AR backbone — see below.)</p>
-          <div class="tl" id="tlFuse"></div>
-          <p class="fig-cap">Inductor <b>fuses</b> the small convolution/activation kernels into fewer, larger ones — same math, fewer launches, earlier finish.</p>
-          <div class="pr-row"><a class="pr" href="https://github.com/sgl-project/sglang-omni/pull/612" target="_blank">#612</a></div>
-        </div>
-      </div>
     </div>
   </div>
 
@@ -838,8 +815,8 @@ footer.site .sig{font-family:var(--mono);font-size:11px;letter-spacing:.15em;tex
     <div class="dive-meta">Qwen3-4B backbone · fused 8-codebook head · 400–800 steps per 10s of speech</div>
     <div class="dive-grid">
       <div class="dive-what"><div class="dw-text">
-        <p>The heart of the system. Each decode step: backbone forward → fused projection to eight codebook heads (<code>[B, 8, V]</code>) → sample eight tokens → advance the delay-pattern state machine → report to the CPU.</p>
-        <p>At 400–800 steps per request the enemy is not FLOPs but <b>per-step fixed cost</b>: dozens of tiny kernel launches and device-to-host syncs. At ~0.1ms of overhead per step, that's <b>~80ms of pure waste per request</b>.</p>
+        <p>Each step: backbone forward → fused 8-head projection <code>[B, 8, V]</code> → sample → advance the delay state machine → report to CPU.</p>
+        <p>At 400–800 steps per request the enemy is <b>per-step fixed cost</b>, not FLOPs: ~0.1ms of launch + sync overhead per step is <b>~80ms wasted per request</b>.</p>
         </div><div class="spec">
           <span class="sl">per-step</span> &nbsp;forward · 8-head projection · sample · D2H<br>
           <span class="sl">state machine</span> &nbsp;delay → active → wind-down → finished<br>
@@ -849,24 +826,17 @@ footer.site .sig{font-family:var(--mono);font-size:11px;letter-spacing:.15em;tex
       <div class="moves">
         <div class="move concept">
           <div class="m-name"><span class="mk">CONCEPT</span>What a CUDA graph actually is</div>
-          <p>Each kernel launch costs the CPU <b>5–10 microseconds</b> of driver overhead. A decode step made of dozens of tiny kernels leaves the GPU idling between them, waiting to be fed. A <b>CUDA graph</b> records the whole sequence once and replays it as a <b>single launch</b> — watch the same step under both modes:</p>
+          <p>Each kernel launch costs the CPU <b>5–10µs</b>; a step of dozens of tiny kernels leaves the GPU starving between them. A <b>CUDA graph</b> records the sequence once and replays it as a <b>single launch</b>:</p>
           <div class="tl" id="tlEager"><div class="tl-title bad"><b>✕ EAGER</b> — CPU launches every kernel; GPU starves between launches</div></div>
           <div class="tl" id="tlGraph"><div class="tl-title good"><b>✓ CUDA GRAPH</b> — one launch, kernels packed back-to-back</div></div>
-          <p class="fig-cap">The catch: the recording is <b class="bad">frozen</b> — same kernels, same shapes, same memory addresses, every replay. Any data-dependent Python branch breaks the contract.</p>
-        </div>
-        <div class="move">
-          <div class="m-name"><span class="mk">APPLY</span>Rewriting the delay pattern to fit the graph</div>
-          <p>The delay-pattern state machine was exactly what CUDA graphs forbid: per-request Python branching on delay counters, EOS detection, wind-down. The rewrite turned <b>control flow into data flow</b>: every branch became a branchless, in-place tensor op on pre-allocated <code>[max_batch, …]</code> buffers — masked arithmetic instead of <code>if</code>/<code>else</code>, overwritten at fixed addresses every step. Around the frozen graph, a runner copies active requests into fixed <b>"shadow" buffers</b>, replays, and scatters results back — all GPU-to-GPU.</p>
-          <div class="tl" id="tlBranch"></div>
-          <p class="fig-cap">Per-request Python branching walks requests <b class="bad">one by one on the CPU</b> — and breaks graph capture. One masked tensor op updates <b>every request's state at once</b>, at fixed addresses, graph-safe.</p>
-          <div class="pr-row"><a class="pr" href="https://github.com/sgl-project/sglang-omni/pull/503" target="_blank">#503</a></div>
+          <p class="fig-cap">The recording is <b class="bad">frozen</b> — so the delay-pattern state machine was rewritten as branchless, in-place tensor ops on fixed buffers: control flow turned into data flow. (<a href="https://github.com/sgl-project/sglang-omni/pull/503" target="_blank" style="border:none">#503</a>)</p>
         </div>
         <div class="move">
           <div class="m-name"><span class="mk">GAIN</span>What it bought — plus two follow-ups</div>
-          <p>Graph replay removes the per-step CPU overhead that cost <b>tens of milliseconds per request</b> (~0.1ms × 400–800 steps). Then: the three per-step D2H syncs were <b>merged into one</b> staging transfer —</p>
+          <p>Two follow-ups. The three per-step D2H syncs, <b>merged into one</b> —</p>
           <div class="tl" id="tlD2h"></div>
           <p class="fig-cap">Each red tick is a device-to-host sync — a full pipeline stall. Packing tokens + state into one staging tensor leaves <b>one stall per step instead of three</b>.</p>
-          <p>— and <b>async one-step lookahead</b> exploited the fact that the token causal chain closes on the GPU, so step t+1 launches before the CPU touches step t:</p>
+          <p>— and <b>async one-step lookahead</b>: the token causal chain closes on the GPU, so step t+1 launches before the CPU touches step t:</p>
           <div class="tl" id="tlBlock"><div class="tl-title bad"><b>✕ BLOCKING</b> — GPU waits for the CPU after every step</div></div>
           <div class="tl" id="tlAhead"><div class="tl-title good"><b>✓ ONE-STEP LOOKAHEAD</b> — CPU work hides under the next GPU step</div></div>
           <p class="fig-cap">Together these drive single-request RTF to <b>0.147</b>.</p>
@@ -874,30 +844,23 @@ footer.site .sig{font-family:var(--mono);font-size:11px;letter-spacing:.15em;tex
         </div>
         <div class="move">
           <div class="m-name"><span class="mk">RADIX</span>Radix cache, partitioned by voice</div>
-          <p>SGLang's <b>RadixAttention</b> keeps previous requests' KV in a prefix tree, so a new request sharing a prefix skips that prefill. In TTS the shared prefix is the <b>reference voice's tokens</b> — namespaced with an <code>extra_key</code> per reference audio. The encoder's LRU and the radix cache stack: a repeated voice skips <b>both</b> the codec encode and the prompt prefill.</p>
+          <p><b>RadixAttention</b> keeps prior KV in a prefix tree; in TTS the shared prefix is the <b>reference voice</b>, namespaced via <code>extra_key</code>. It stacks with the encoder LRU: a repeated voice skips both the encode and the prefill.</p>
           <div class="tl" id="tlRadix"></div>
-          <p class="fig-cap">Same shape as the LRU figure one layer up — that's the point: the two caches <b>stack</b>. Request 2 skips the prefill of voice A's prompt KV entirely; voice B builds its own namespace.</p>
+          <p class="fig-cap">Same shape as the LRU figure — that's the point: the two caches <b>stack</b>.</p>
         </div>
         <div class="move">
           <div class="m-name"><span class="mk">PAGED</span>Paged attention for free</div>
-          <p>KV memory lives in fixed-size pages, not contiguous slabs — no fragmentation, no over-reservation, which is what lets <b>16 concurrent AR loops</b> share one H100 with the encoder and vocoder. Inherited by reusing <code>OmniScheduler</code> instead of a custom scheduler.</p>
+          <p>KV lives in fixed-size pages — no fragmentation, no over-reservation. That's what lets <b>16 AR loops</b> share one H100 with the encoder and vocoder. Inherited free by reusing <code>OmniScheduler</code>.</p>
           <div class="mem" id="memAnim">
             <div class="mem-row"><span class="mem-lab">contiguous</span><div class="mem-cells" id="memCont"></div></div>
             <div class="mem-status" id="memContStatus"></div>
             <div class="mem-row" style="margin-top:16px"><span class="mem-lab">paged</span><div class="mem-cells" id="memPage"></div></div>
             <div class="mem-status" id="memPageStatus"></div>
           </div>
-          <p class="fig-cap">Requests A·B·C allocate, then A finishes. A new request D needs 10 blocks: the contiguous allocator <b class="bad">rejects it</b> — free memory exists but is fragmented. The paged allocator scatters D across whatever pages are free.</p>
+          <p class="fig-cap">A finishes, D needs 10 blocks: contiguous <b class="bad">rejects</b> (free but fragmented); paged scatters D across whatever is free.</p>
           <div class="pr-row"><a class="pr" href="https://github.com/sgl-project/sglang-omni/pull/476" target="_blank">#476</a></div>
         </div>
-        <div class="move cut">
-          <div class="m-name"><span class="mk">CUT</span>torch.compile on the backbone — removed</div>
-          <p>With manual CUDA graphs already eliminating launch overhead, compilation added marginal throughput but a heavy cold-start penalty — dropped. It also hid a trap: at CG batch ≥ 16 with compile on, WER exploded from <b>0.1–0.4% to 99–100%</b> (upstream SGLang × Inductor capture interaction; mitigated by capping <code>_compiled_max_decode_bs=12</code>). Correctness bugs in audio don't crash — they speak gibberish.</p>
-          <div class="tl" id="tlCut"></div>
-          <p class="fig-cap">The trade that killed it: minutes of Inductor compile wall before the first request, for throughput the CUDA graph had already banked — plus the <b class="bad">WER 99% trap</b> lurking at large batch.</p>
-          <div class="pr-row"><a class="pr" href="https://github.com/sgl-project/sglang-omni/issues/565" target="_blank">#565</a><a class="pr" href="https://github.com/sgl-project/sglang-omni/issues/578" target="_blank">#578</a><a class="pr" href="https://github.com/sgl-project/sglang-omni/pull/579" target="_blank">#579</a></div>
         </div>
-      </div>
     </div>
   </div>
 
@@ -907,9 +870,8 @@ footer.site .sig{font-family:var(--mono);font-size:11px;letter-spacing:.15em;tex
     <div class="dive-meta">DAC decoder · ~10ms per call · batched decode + windowed streaming</div>
     <div class="dive-grid">
       <div class="dive-what"><div class="dw-text">
-        <p><b>Problem one — queueing.</b> Every AR loop converges on this stage. Under 16-way concurrency, finished requests decode serially: 16 × 15ms leaves the last one waiting 240ms. Fixed by batching inside a 2ms collection window.</p>
-        <p><b>Problem two — streaming.</b> Audio cannot be chunked like LLM text: the codec's convolutions carry <b>state across time</b> (independent chunks click at every seam), and mid-stream the delay pattern's trailing rows are <b>incomplete</b> (decoding them injects noise).</p>
-        <p>The window protocol below solves both — watch it run.</p>
+        <p><b>Queueing:</b> every AR loop converges here — 16 requests decoded serially leave the last waiting 240ms.</p>
+        <p><b>Streaming:</b> audio can't be chunked like text — the codec carries state across time (chunks click at every seam), and mid-stream delay rows are incomplete (decoding them injects noise).</p>
         </div><div class="spec">
           <span class="sl">stride</span> &nbsp;<b>75 frames</b> — accumulate, then decode<br>
           <span class="sl">overlap</span> &nbsp;<b>8 frames</b> — re-decode boundary + crossfade<br>
@@ -920,15 +882,15 @@ footer.site .sig{font-family:var(--mono);font-size:11px;letter-spacing:.15em;tex
       <div class="moves">
         <div class="move">
           <div class="m-name"><span class="mk">BATCH</span>Batched vocoder decode</div>
-          <p>Requests are collected in a tight <code>max_batch_wait_ms=2ms</code> window, zero-padded, stacked as <code>[B, num_codebooks, max_len]</code>, decoded in one <code>codec.decode_batch()</code> call, then trimmed to true length.</p>
+          <p>Collect requests in a <code>2ms</code> window, zero-pad, decode as one <code>decode_batch()</code> call, trim to true length.</p>
           <div class="tl" id="tlVocBatch"></div>
-          <p class="fig-cap">Six requests finish their AR loops together. Decoded serially, the last one <b class="bad">queues behind five others</b>; batched, everyone leaves in a single GPU call.</p>
+          <p class="fig-cap">Serial: the last request <b class="bad">queues behind five others</b>. Batched: everyone leaves in one GPU call.</p>
           <div class="pr-row"><a class="pr" href="https://github.com/sgl-project/sglang-omni/issues/569" target="_blank">#569</a><a class="pr" href="https://github.com/sgl-project/sglang-omni/pull/574" target="_blank">#574</a></div>
         </div>
         <div class="move">
           <div class="m-name"><span class="mk">RACE</span>Non-streaming vs streaming — same request</div>
           <div class="tl" id="tlRace"></div>
-          <p class="fig-cap">Timings measured against <b>api.boson.ai</b> with this page's demo: streaming first audio at <b>~0.7s</b>; non-streaming playable only at <b>~1.5s</b>, after the full MP3 arrives. Same generation cost — the difference is purely <b>when</b> sound starts.</p>
+          <p class="fig-cap">Measured against <b>api.boson.ai</b>: first audio at <b>~0.7s</b> streaming vs <b>~1.5s</b> non-streaming. Same generation cost — the difference is <b>when</b> sound starts.</p>
         </div>
         <div class="move">
           <div class="m-name"><span class="mk">STREAM</span>The window protocol, animated</div>
@@ -938,11 +900,11 @@ footer.site .sig{font-family:var(--mono);font-size:11px;letter-spacing:.15em;tex
             <div class="va-row"><span class="va-lab">emitted audio</span><div class="va-audiolane" id="vaAudio"></div></div>
             <div class="va-status" id="vaStatus"></div>
           </div>
-          <p class="fig-cap">Codes accumulate to the <b>stride</b>, the window <b>backtracks into the previous chunk</b> (cyan leading edge = crossfade overlap) and re-decodes jointly so the codec sees continuous context, while the last frames stay <b>held back</b> (dashed) until their high codebooks fill. Real parameters 75 / 8 / 4 — scaled here for display.</p>
+          <p class="fig-cap">Cyan leading edge = crossfade overlap; dashed cells = held-back tail. Real parameters 75 / 8 / 4, scaled for display.</p>
           <div class="pr-row"><a class="pr" href="https://github.com/sgl-project/sglang-omni/pull/597" target="_blank">#597</a><a class="pr" href="https://github.com/sgl-project/sglang-omni/pull/614" target="_blank">#614</a></div>
         </div>
         <div class="callout">
-          <b>Irreducible startup cost:</b> the vocoder needs at least N rows (N = number of codebooks) before it can invert the delay pattern at all. Stacked with the stride, measured streaming <b>TTFB ≈ 300–400ms</b> — under the 500ms conversational threshold. Verify it yourself in the demo below.
+          <b>Irreducible startup:</b> the vocoder needs ≥ N rows to invert the pattern → streaming <b>TTFB ≈ 300–400ms</b>, under the 500ms conversational bar. Verify it in the demo below.
         </div>
       </div>
     </div>
@@ -953,10 +915,9 @@ footer.site .sig{font-family:var(--mono);font-size:11px;letter-spacing:.15em;tex
 <section id="demo">
   <div class="sec-head reveal"><span class="no">05</span><h2>Live Demo: Clone Your Voice</h2></div>
   <p class="sec-lede reveal">
-    Everything above, running in production. Record a few seconds of your voice as the <b>reference audio</b>
-    (the encoder + LRU + radix cache path), type a sentence, and race <b>non-streaming against streaming</b> —
-    the TTFB gap you'll hear is the windowed vocoder at work. Calls go directly from your browser to
-    <code>api.boson.ai</code> · <a href="https://bosonai.mintlify.app/api-reference/text-to-speech/create-speech" target="_blank">API docs</a>.
+    Record your voice as the <b>reference audio</b>, type a sentence, and race <b>non-streaming against
+    streaming</b>. Calls go directly from your browser to <code>api.boson.ai</code> ·
+    <a href="https://bosonai.mintlify.app/api-reference/text-to-speech/create-speech" target="_blank">API docs</a>.
   </p>
   <div class="demo-shell reveal">
     <div class="demo-bar"><i></i><i></i><i></i><span style="margin-left:10px">POST /v1/audio/speech · model: higgs-audio-v3-tts</span></div>
@@ -1160,34 +1121,6 @@ tlMake('tlLru',{period:8,lanes:[
   {label:'req 3 · voice B',segs:[{t0:.40,t1:.68,cls:'c-enc',label:'encode (miss)'},{t0:.68,t1:.90,cls:'c-ar',label:'AR'}]}
 ]});
 
-/* 04A — encoder: online batching vs offline warmup */
-tlMake('tlBatchBad',{period:8,lanes:[
-  {label:'AR loops',segs:[{t0:.00,t1:.24,cls:'c-ar',label:'live traffic'},{t0:.24,t1:.38,cls:'c-sync',label:'stall'},{t0:.38,t1:.56,cls:'c-ar'},{t0:.56,t1:.70,cls:'c-sync',label:'stall'},{t0:.70,t1:.90,cls:'c-ar'}]},
-  {label:'batch encode',segs:[{t0:.24,t1:.38,cls:'c-enc',label:'burst'},{t0:.56,t1:.70,cls:'c-enc',label:'burst'}],marks:[{t:.70,html:'SM contention',dim:true}]}
-]});
-tlMake('tlBatchGood',{period:8,lanes:[
-  {label:'warmup',segs:[{t0:.00,t1:.16,cls:'c-enc',label:'batch-encode voice bank (offline)'}]},
-  {label:'AR loops',segs:[{t0:.16,t1:.90,cls:'c-ar',label:'live traffic — smooth, no contention'}],marks:[{t:.90,html:'✓'}]}
-]});
-
-/* 04A — encoder torch.compile: kernel fusion */
-(function(){
-  const eager=[];for(let i=0;i<8;i++)eager.push({t0:.02+i*.085,t1:.075+i*.085,cls:'c-kern',label:i===0?'small kernels':''});
-  tlMake('tlFuse',{period:7,lanes:[
-    {label:'eager',segs:eager,marks:[{t:.70,html:'done',dim:true}]},
-    {label:'compiled',segs:[{t0:.02,t1:.17,cls:'c-kern',label:'fused'},{t0:.17,t1:.32,cls:'c-kern',label:'fused'},{t0:.32,t1:.44,cls:'c-kern',label:'fused'}],marks:[{t:.44,html:'done — fewer launches'}]}
-  ]});
-})();
-
-/* 04B — delay-pattern rewrite: branches vs masked op */
-tlMake('tlBranch',{period:7,lanes:[
-  {label:'python if/else',segs:[
-    {t0:.02,t1:.14,cls:'c-cpu',label:'req 1'},{t0:.16,t1:.28,cls:'c-cpu',label:'req 2'},
-    {t0:.30,t1:.42,cls:'c-cpu',label:'req 3'},{t0:.44,t1:.56,cls:'c-cpu',label:'req 4'}],
-    marks:[{t:.56,html:'CPU-serial · breaks CG capture ✕',dim:true}]},
-  {label:'masked tensor op',segs:[{t0:.02,t1:.16,cls:'c-kern',label:'all requests at once'}],marks:[{t:.16,html:'in-place, fixed address — graph-safe ✓'}]}
-]});
-
 /* 04B — D2H: 3 syncs vs 1 per step */
 tlMake('tlD2h',{period:7,lanes:[
   {label:'3 syncs / step',segs:[
@@ -1206,12 +1139,6 @@ tlMake('tlRadix',{period:8,lanes:[
   {label:'req 1 · voice A',segs:[{t0:.02,t1:.24,cls:'c-enc',label:'prefill voice-A KV'},{t0:.24,t1:.46,cls:'c-ar',label:'decode'}]},
   {label:'req 2 · voice A',segs:[{t0:.26,t1:.285,cls:'c-play'},{t0:.285,t1:.505,cls:'c-ar',label:'decode'}],marks:[{t:.285,html:'prefix KV reused — prefill skipped'}]},
   {label:'req 3 · voice B',segs:[{t0:.34,t1:.56,cls:'c-enc',label:'prefill voice-B KV'},{t0:.56,t1:.78,cls:'c-ar',label:'decode'}]}
-]});
-
-/* 04B — torch.compile removal: cold start */
-tlMake('tlCut',{period:8,lanes:[
-  {label:'with compile',segs:[{t0:.02,t1:.46,cls:'c-cpu',label:'inductor compiling…'},{t0:.46,t1:.88,cls:'c-ar',label:'serving'}],marks:[{t:.46,html:'first request only now',dim:true},{t:.80,html:'☠ bs≥16 → WER 99%',dim:true}]},
-  {label:'no compile',segs:[{t0:.02,t1:.88,cls:'c-ar',label:'serving immediately — CUDA graph already removed the overhead'}],marks:[{t:.04,html:'✓'}]}
 ]});
 
 /* 04C — vocoder: serial vs batched decode */
