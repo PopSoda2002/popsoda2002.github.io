@@ -1,0 +1,702 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>微秒之战 — Higgs Audio v3 TTS 推理优化历程</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=ZCOOL+QingKe+HuangYou&family=Noto+Sans+SC:wght@300;400;500;700&family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,600;1,400&display=swap" rel="stylesheet">
+<style>
+:root{
+  --ink:#07090d;
+  --ink-2:#0c1016;
+  --ink-3:#121823;
+  --line:#1e2734;
+  --line-bright:#2c3a4e;
+  --paper:#e8e3d8;
+  --paper-dim:#9aa3ad;
+  --paper-faint:#5d6671;
+  --amber:#ffb454;
+  --amber-deep:#e08c1a;
+  --teal:#3ddbc9;
+  --teal-deep:#1a9e90;
+  --red:#ff6b6b;
+  --display:'ZCOOL QingKe HuangYou',sans-serif;
+  --body:'Noto Sans SC',sans-serif;
+  --mono:'IBM Plex Mono',monospace;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+::selection{background:var(--amber);color:var(--ink)}
+html{scroll-behavior:smooth}
+body{
+  background:var(--ink);
+  color:var(--paper);
+  font-family:var(--body);
+  font-weight:300;
+  line-height:1.8;
+  overflow-x:hidden;
+}
+/* grain overlay */
+body::after{
+  content:"";position:fixed;inset:0;pointer-events:none;z-index:999;opacity:.05;
+  background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+/* faint scanline atmosphere */
+body::before{
+  content:"";position:fixed;inset:0;pointer-events:none;z-index:998;opacity:.4;
+  background:repeating-linear-gradient(to bottom,transparent 0 3px,rgba(0,0,0,.18) 3px 4px);
+}
+a{color:var(--teal);text-decoration:none;border-bottom:1px dotted var(--teal-deep)}
+a:hover{color:var(--amber);border-color:var(--amber-deep)}
+.mono{font-family:var(--mono)}
+.amber{color:var(--amber)}
+.teal{color:var(--teal)}
+
+/* ============ NAV ============ */
+nav{
+  position:fixed;top:0;left:0;right:0;z-index:100;
+  display:flex;align-items:center;justify-content:space-between;
+  padding:14px 32px;
+  background:linear-gradient(to bottom,rgba(7,9,13,.92),rgba(7,9,13,.75));
+  backdrop-filter:blur(12px);
+  border-bottom:1px solid var(--line);
+}
+nav .brand{font-family:var(--mono);font-size:12px;letter-spacing:.18em;color:var(--paper-dim)}
+nav .brand b{color:var(--amber);font-weight:600}
+nav .links{display:flex;gap:26px;font-size:13px}
+nav .links a{color:var(--paper-dim);border:none;letter-spacing:.08em;transition:color .2s}
+nav .links a:hover{color:var(--amber)}
+nav .links .num{font-family:var(--mono);font-size:10px;color:var(--teal-deep);margin-right:4px}
+@media(max-width:760px){nav .links{display:none}}
+
+/* ============ HERO ============ */
+.hero{
+  min-height:100vh;position:relative;
+  display:flex;flex-direction:column;justify-content:center;
+  padding:120px 7vw 60px;
+  background:
+    radial-gradient(ellipse 80% 50% at 70% 20%,rgba(61,219,201,.06),transparent 60%),
+    radial-gradient(ellipse 60% 40% at 20% 80%,rgba(255,180,84,.07),transparent 60%);
+}
+.hero .kicker{
+  font-family:var(--mono);font-size:12px;letter-spacing:.35em;
+  color:var(--teal);text-transform:uppercase;margin-bottom:28px;
+  display:flex;align-items:center;gap:14px;
+  animation:fadeUp .8s .1s both;
+}
+.hero .kicker::before{content:"";width:48px;height:1px;background:var(--teal-deep)}
+.hero h1{
+  font-family:var(--display);font-weight:400;
+  font-size:clamp(56px,11vw,148px);
+  line-height:1.02;letter-spacing:.02em;
+  animation:fadeUp .8s .25s both;
+}
+.hero h1 .l2{display:block;color:var(--amber);}
+.hero .sub{
+  margin-top:34px;max-width:620px;font-size:16px;color:var(--paper-dim);
+  animation:fadeUp .8s .4s both;
+}
+.hero .sub b{color:var(--paper);font-weight:500}
+.hero-stats{
+  display:flex;flex-wrap:wrap;gap:0;margin-top:64px;
+  border-top:1px solid var(--line);
+  animation:fadeUp .8s .55s both;
+}
+.hero-stats .stat{
+  padding:26px 44px 6px 0;margin-right:44px;
+  border-right:1px dashed var(--line);
+}
+.hero-stats .stat:last-child{border-right:none}
+.hero-stats .v{font-family:var(--mono);font-size:clamp(28px,4vw,44px);font-weight:600;color:var(--paper)}
+.hero-stats .v em{font-style:normal;font-size:.45em;color:var(--paper-faint);margin-left:4px}
+.hero-stats .k{font-size:12px;color:var(--paper-faint);letter-spacing:.12em;margin-top:2px}
+.hero-stats .stat:nth-child(1) .v{color:var(--amber)}
+.hero-stats .stat:nth-child(2) .v{color:var(--teal)}
+
+/* waveform strip */
+.wave-strip{
+  position:absolute;left:0;right:0;bottom:0;height:120px;overflow:hidden;
+  opacity:.9;pointer-events:none;
+  -webkit-mask-image:linear-gradient(to right,transparent,#000 12%,#000 88%,transparent);
+  mask-image:linear-gradient(to right,transparent,#000 12%,#000 88%,transparent);
+}
+.wave-strip .bars{
+  position:absolute;inset:0;display:flex;align-items:center;gap:5px;padding:0 4vw;
+}
+.wave-strip .bars i{
+  flex:1;background:linear-gradient(to top,var(--teal-deep),var(--teal));
+  min-width:2px;border-radius:1px;opacity:.5;
+  animation:pulse 1.6s ease-in-out infinite;
+}
+@keyframes pulse{0%,100%{transform:scaleY(.35)}50%{transform:scaleY(1)}}
+@keyframes fadeUp{from{opacity:0;transform:translateY(28px)}to{opacity:1;transform:none}}
+
+/* ============ SHARED SECTION ============ */
+section{padding:110px 7vw;position:relative}
+.sec-head{display:flex;align-items:baseline;gap:22px;margin-bottom:18px}
+.sec-head .no{
+  font-family:var(--mono);font-size:13px;color:var(--teal);
+  border:1px solid var(--teal-deep);padding:4px 10px;letter-spacing:.1em;
+}
+.sec-head h2{
+  font-family:var(--display);font-weight:400;
+  font-size:clamp(34px,5vw,58px);letter-spacing:.03em;
+}
+.sec-lede{max-width:680px;color:var(--paper-dim);font-size:15.5px;margin-bottom:56px}
+.sec-lede b{color:var(--amber);font-weight:500}
+
+/* reveal on scroll */
+.reveal{opacity:0;transform:translateY(36px);transition:opacity .7s ease,transform .7s ease}
+.reveal.in{opacity:1;transform:none}
+
+/* ============ PIPELINE ============ */
+#pipeline{background:var(--ink-2);border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+.pipe{
+  display:grid;grid-template-columns:repeat(4,1fr);gap:0;
+  border:1px solid var(--line);background:var(--ink);
+}
+.pipe .node{
+  padding:34px 26px 30px;border-right:1px solid var(--line);position:relative;
+  transition:background .3s;
+}
+.pipe .node:last-child{border-right:none}
+.pipe .node:hover{background:var(--ink-3)}
+.pipe .node::after{
+  content:"▸";position:absolute;right:-9px;top:50%;transform:translateY(-50%);
+  color:var(--amber);font-size:15px;z-index:2;background:var(--ink);padding:2px 0;
+}
+.pipe .node:last-child::after{display:none}
+.pipe .tag{font-family:var(--mono);font-size:10px;letter-spacing:.2em;padding:3px 8px;display:inline-block;margin-bottom:16px}
+.tag.cpu{color:var(--paper-dim);border:1px solid var(--line-bright)}
+.tag.gpu{color:var(--teal);border:1px solid var(--teal-deep)}
+.pipe h3{font-family:var(--display);font-weight:400;font-size:24px;letter-spacing:.04em;margin-bottom:10px}
+.pipe p{font-size:13px;color:var(--paper-dim);line-height:1.75}
+.pipe .mono-note{font-family:var(--mono);font-size:11px;color:var(--amber);margin-top:14px;display:block}
+@media(max-width:980px){.pipe{grid-template-columns:1fr 1fr}.pipe .node:nth-child(2)::after{display:none}}
+@media(max-width:560px){.pipe{grid-template-columns:1fr}.pipe .node::after{display:none}.pipe .node{border-right:none;border-bottom:1px solid var(--line)}}
+
+/* delay pattern */
+.delay-wrap{margin-top:72px;display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,.9fr);gap:60px;align-items:center}
+@media(max-width:900px){.delay-wrap{grid-template-columns:1fr}}
+.delay-grid{
+  display:grid;grid-template-columns:auto repeat(12,1fr);gap:4px;
+  font-family:var(--mono);font-size:10px;
+}
+.delay-grid .rl{color:var(--paper-faint);align-self:center;padding-right:8px;white-space:nowrap}
+.delay-grid .cell{
+  aspect-ratio:1;background:var(--ink-3);border:1px solid var(--line);
+  position:relative;
+}
+.delay-grid .cell.on{
+  background:linear-gradient(135deg,var(--teal-deep),var(--teal));
+  border-color:var(--teal);
+  box-shadow:0 0 10px rgba(61,219,201,.25);
+}
+.delay-grid .cell.first{
+  background:linear-gradient(135deg,var(--amber-deep),var(--amber));
+  border-color:var(--amber);
+  box-shadow:0 0 10px rgba(255,180,84,.3);
+}
+.in .delay-grid .cell.on,.in .delay-grid .cell.first{animation:cellIn .4s both}
+@keyframes cellIn{from{opacity:0;transform:scale(.5)}to{opacity:1;transform:none}}
+.delay-grid .ch{color:var(--paper-faint);text-align:center;padding-bottom:4px}
+.delay-side h3{font-family:var(--display);font-weight:400;font-size:30px;margin-bottom:16px;letter-spacing:.03em}
+.delay-side p{font-size:14px;color:var(--paper-dim);margin-bottom:14px}
+.delay-side p b{color:var(--paper);font-weight:500}
+.delay-side .legend{display:flex;gap:24px;margin-top:20px;font-family:var(--mono);font-size:11px;color:var(--paper-dim)}
+.delay-side .legend i{display:inline-block;width:11px;height:11px;margin-right:7px;vertical-align:-1px}
+.delay-side .legend .a i{background:var(--amber)}
+.delay-side .legend .b i{background:var(--teal)}
+.delay-side .legend .c i{background:var(--ink-3);border:1px solid var(--line)}
+
+/* ============ BOTTLENECKS ============ */
+.bn-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:28px}
+@media(max-width:900px){.bn-grid{grid-template-columns:1fr}}
+.bn{
+  background:var(--ink-2);border:1px solid var(--line);padding:38px 32px;
+  position:relative;overflow:hidden;transition:border-color .3s,transform .3s;
+}
+.bn:hover{border-color:var(--amber-deep);transform:translateY(-4px)}
+.bn::before{
+  content:attr(data-no);position:absolute;top:-22px;right:6px;
+  font-family:var(--display);font-size:120px;color:var(--ink-3);line-height:1;
+  z-index:0;
+}
+.bn>*{position:relative;z-index:1}
+.bn .b-tag{font-family:var(--mono);font-size:11px;letter-spacing:.22em;color:var(--red);margin-bottom:18px}
+.bn h3{font-family:var(--display);font-weight:400;font-size:27px;letter-spacing:.03em;margin-bottom:14px}
+.bn p{font-size:13.5px;color:var(--paper-dim)}
+.bn .fig{
+  margin-top:24px;padding-top:20px;border-top:1px dashed var(--line);
+  font-family:var(--mono);font-size:12px;color:var(--paper-faint);
+}
+.bn .fig b{display:block;font-size:26px;font-weight:600;color:var(--amber);margin-bottom:2px}
+
+/* ============ OPTIMIZATION TIMELINE ============ */
+#opt{background:var(--ink-2);border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+.timeline{position:relative;margin-top:20px}
+.timeline::before{
+  content:"";position:absolute;left:19px;top:0;bottom:0;width:1px;
+  background:linear-gradient(to bottom,var(--teal-deep),var(--amber-deep),var(--teal-deep));
+  opacity:.55;
+}
+.t-item{position:relative;padding:0 0 64px 76px}
+.t-item:last-child{padding-bottom:0}
+.t-item .dot{
+  position:absolute;left:8px;top:6px;width:23px;height:23px;
+  border:1px solid var(--teal);background:var(--ink);
+  display:flex;align-items:center;justify-content:center;
+  font-family:var(--mono);font-size:10px;color:var(--teal);
+}
+.t-item .phase{
+  font-family:var(--mono);font-size:11px;letter-spacing:.28em;color:var(--teal);
+  text-transform:uppercase;margin-bottom:10px;
+}
+.t-item h3{font-family:var(--display);font-weight:400;font-size:clamp(26px,3.4vw,38px);letter-spacing:.03em;margin-bottom:18px}
+.t-item h3 .layer{color:var(--amber)}
+.t-item .t-body{max-width:780px;font-size:14.5px;color:var(--paper-dim)}
+.t-item .t-body p{margin-bottom:14px}
+.t-item .t-body b{color:var(--paper);font-weight:500}
+.t-item code{
+  font-family:var(--mono);font-size:.86em;color:var(--teal);
+  background:var(--ink);border:1px solid var(--line);padding:1px 7px;border-radius:2px;
+  white-space:nowrap;
+}
+.moves{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:24px;max-width:880px}
+@media(max-width:760px){.moves{grid-template-columns:1fr}}
+.move{
+  background:var(--ink);border:1px solid var(--line);padding:22px 24px;
+  border-left:3px solid var(--teal-deep);transition:border-color .3s;
+}
+.move:hover{border-left-color:var(--amber)}
+.move .m-name{font-weight:500;font-size:15px;color:var(--paper);margin-bottom:8px;display:flex;align-items:center;gap:10px}
+.move .m-name .mk{font-family:var(--mono);font-size:10px;color:var(--amber);border:1px solid var(--amber-deep);padding:2px 7px;letter-spacing:.1em}
+.move p{font-size:13px;color:var(--paper-dim);line-height:1.75}
+.move.cut{border-left-color:var(--red)}
+.move.cut .m-name .mk{color:var(--red);border-color:var(--red)}
+.callout{
+  margin-top:26px;max-width:880px;padding:22px 28px;
+  background:linear-gradient(to right,rgba(255,180,84,.07),transparent);
+  border-left:3px solid var(--amber);font-size:14px;color:var(--paper-dim);
+}
+.callout b{color:var(--amber);font-weight:500}
+
+/* stride diagram */
+.stride{display:flex;gap:8px;margin-top:24px;align-items:flex-end;font-family:var(--mono);font-size:10px;max-width:680px}
+.stride .blk{flex:1;text-align:center;color:var(--paper-faint)}
+.stride .bar{height:46px;margin-bottom:8px;border:1px solid var(--line)}
+.stride .stride-b .bar{background:repeating-linear-gradient(45deg,var(--teal-deep) 0 6px,rgba(26,158,144,.35) 6px 12px);border-color:var(--teal-deep);flex-basis:60%}
+.stride .ovl .bar{background:var(--amber-deep);border-color:var(--amber)}
+.stride .hold .bar{background:var(--ink-3);border-style:dashed}
+.stride .stride-b{flex:6}.stride .ovl{flex:1.2}.stride .hold{flex:.8}
+
+/* ============ BENCH ============ */
+.bench-wrap{display:grid;grid-template-columns:minmax(0,1.05fr) minmax(0,.95fr);gap:64px;align-items:start}
+@media(max-width:980px){.bench-wrap{grid-template-columns:1fr}}
+table{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:13px}
+thead th{
+  text-align:right;font-weight:500;color:var(--teal);font-size:11px;letter-spacing:.1em;
+  padding:12px 14px;border-bottom:1px solid var(--teal-deep);white-space:nowrap;
+}
+thead th:first-child{text-align:left}
+tbody td{
+  text-align:right;padding:14px;border-bottom:1px solid var(--line);color:var(--paper-dim);
+}
+tbody td:first-child{text-align:left;color:var(--paper);font-weight:500}
+tbody tr{transition:background .2s}
+tbody tr:hover{background:var(--ink-3)}
+tbody tr:last-child td{color:var(--paper);background:rgba(255,180,84,.05)}
+tbody tr:last-child td:first-child{color:var(--amber)}
+.tbl-note{font-size:12px;color:var(--paper-faint);margin-top:14px;font-family:var(--mono)}
+.bars-title{font-family:var(--mono);font-size:11px;letter-spacing:.22em;color:var(--paper-faint);margin-bottom:22px}
+.bbar{margin-bottom:20px}
+.bbar .lab{display:flex;justify-content:space-between;font-family:var(--mono);font-size:11px;color:var(--paper-dim);margin-bottom:7px}
+.bbar .lab b{color:var(--teal);font-weight:600}
+.bbar .track{height:22px;background:var(--ink-3);border:1px solid var(--line);position:relative;overflow:hidden}
+.bbar .fill{
+  height:100%;width:0;
+  background:linear-gradient(to right,var(--teal-deep),var(--teal));
+  transition:width 1.2s cubic-bezier(.22,1,.36,1);
+  position:relative;
+}
+.bbar .fill::after{content:"";position:absolute;right:0;top:0;bottom:0;width:2px;background:#fff;opacity:.7}
+.bbar.hot .fill{background:linear-gradient(to right,var(--amber-deep),var(--amber))}
+.bbar.hot .lab b{color:var(--amber)}
+.rtf-pill{
+  display:inline-flex;align-items:baseline;gap:10px;margin-top:34px;
+  border:1px dashed var(--line-bright);padding:16px 24px;font-family:var(--mono);
+}
+.rtf-pill .big{font-size:30px;font-weight:600;color:var(--teal)}
+.rtf-pill span{font-size:12px;color:var(--paper-faint)}
+
+/* ============ LESSONS ============ */
+#lessons{background:var(--ink-2);border-top:1px solid var(--line)}
+.lesson-list{counter-reset:lesson;max-width:860px}
+.lesson{
+  display:grid;grid-template-columns:90px 1fr;gap:28px;
+  padding:34px 0;border-bottom:1px solid var(--line);
+}
+.lesson:first-child{border-top:1px solid var(--line)}
+.lesson .ln{
+  font-family:var(--display);font-size:46px;color:var(--ink-3);line-height:1;
+  -webkit-text-stroke:1px var(--line-bright);
+}
+.lesson h3{font-family:var(--display);font-weight:400;font-size:24px;letter-spacing:.04em;margin-bottom:8px}
+.lesson h3 .en{font-family:var(--mono);font-size:11px;color:var(--teal);letter-spacing:.18em;margin-left:14px;vertical-align:2px}
+.lesson p{font-size:14px;color:var(--paper-dim);max-width:640px}
+.lesson p b{color:var(--amber);font-weight:500}
+@media(max-width:600px){.lesson{grid-template-columns:1fr;gap:8px}}
+
+blockquote{
+  margin:80px auto 0;max-width:760px;text-align:center;
+  font-family:var(--display);font-weight:400;font-size:clamp(22px,3.2vw,32px);
+  line-height:1.6;letter-spacing:.04em;color:var(--paper);
+  padding:0 20px;
+}
+blockquote .hl{color:var(--amber)}
+blockquote footer{font-family:var(--mono);font-size:12px;color:var(--paper-faint);margin-top:22px;letter-spacing:.15em}
+
+/* ============ FOOTER ============ */
+footer.site{
+  padding:60px 7vw 50px;border-top:1px solid var(--line);
+  display:flex;justify-content:space-between;flex-wrap:wrap;gap:24px;
+  font-size:13px;color:var(--paper-faint);
+}
+footer.site .src{max-width:560px}
+footer.site .src b{display:block;font-family:var(--mono);font-size:11px;letter-spacing:.22em;color:var(--paper-dim);margin-bottom:12px}
+footer.site .src a{display:block;margin-bottom:8px;font-size:13px}
+footer.site .sig{font-family:var(--mono);font-size:11px;letter-spacing:.15em;text-align:right}
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="brand">HIGGS·AUDIO·V3 <b>/ SGLANG-OMNI</b></div>
+  <div class="links">
+    <a href="#pipeline"><span class="num">01</span>流水线</a>
+    <a href="#bottleneck"><span class="num">02</span>瓶颈</a>
+    <a href="#opt"><span class="num">03</span>优化历程</a>
+    <a href="#bench"><span class="num">04</span>实测</a>
+    <a href="#lessons"><span class="num">05</span>启示</a>
+  </div>
+</nav>
+
+<!-- ================= HERO ================= -->
+<header class="hero">
+  <div class="kicker">TTS Inference Optimization · 2026</div>
+  <h1>微秒之战<span class="l2">让语音快过声音</span></h1>
+  <p class="sub">
+    Higgs Audio v3 TTS 在 SGLang-Omni 上的推理优化全记录——
+    一条 <b>四阶段异构流水线</b>,数百个自回归解码步,每步几十微秒的开销被放大成数百毫秒的延迟。
+    这是一场关于 <b>CUDA Graph、延迟模式状态机与窗口化流式声码</b> 的逐层手术。
+  </p>
+  <div class="hero-stats">
+    <div class="stat"><div class="v">0.147<em>RTF</em></div><div class="k">单请求实时率 · 远快于实时</div></div>
+    <div class="stat"><div class="v">61.8<em>audio s/s</em></div><div class="k">单卡 H100 · 并发 16 音频产出</div></div>
+    <div class="stat"><div class="v">~350<em>ms</em></div><div class="k">流式 TTFB · 低于 500ms 会话阈值</div></div>
+    <div class="stat"><div class="v">111<em>langs</em></div><div class="k">语言/方言 · 个位数 WER/CER</div></div>
+  </div>
+  <div class="wave-strip"><div class="bars" id="waveBars"></div></div>
+</header>
+
+<!-- ================= 01 PIPELINE ================= -->
+<section id="pipeline">
+  <div class="sec-head reveal"><span class="no">01</span><h2>一条声音的流水线</h2></div>
+  <p class="sec-lede reveal">
+    优化 TTS 看似与优化 LLM 相同,实则瓶颈截然不同。Higgs Audio v3(约 4B 参数,Qwen3 骨干)
+    的端到端路径被切成 <b>四个计算模式完全不同的阶段</b>——理解数据如何穿过它们,是一切优化的前提。
+  </p>
+  <div class="pipe reveal">
+    <div class="node">
+      <span class="tag cpu">CPU · I/O 密集</span>
+      <h3>预处理</h3>
+      <p>文本分词与参考音频加载。看似平凡,却决定请求进入 GPU 前的排队形态。</p>
+      <span class="mono-note">tokenize + ref-audio load</span>
+    </div>
+    <div class="node">
+      <span class="tag gpu">GPU · 静态计算</span>
+      <h3>音频编码器</h3>
+      <p>HiggsAudioCodec(DAC 风格神经编解码器)把参考波形压成离散 token,单次 50–100ms。</p>
+      <span class="mono-note">waveform → [T, 8] tokens</span>
+    </div>
+    <div class="node">
+      <span class="tag gpu">GPU · 自回归主干</span>
+      <h3>TTS 引擎</h3>
+      <p>基于 Qwen3 的 AR 模型逐步生成多码本 token,8 个码本的嵌入融合为单次查找。</p>
+      <span class="mono-note">step-by-step → [B, 8, V]</span>
+    </div>
+    <div class="node">
+      <span class="tag gpu">GPU · 快但易排队</span>
+      <h3>声码器</h3>
+      <p>DAC 解码器把 token 还原为可听波形,与编码器共享权重,单次调用约 10ms。</p>
+      <span class="mono-note">tokens → waveform @25fps</span>
+    </div>
+  </div>
+
+  <div class="delay-wrap reveal">
+    <div>
+      <div class="delay-grid" id="delayGrid"></div>
+    </div>
+    <div class="delay-side">
+      <h3>延迟模式:最棘手的部分</h3>
+      <p><b>码本 0</b> 负责粗结构(音高、语调),<b>码本 7</b> 负责高频纹理。码本 <i class="mono teal">i</i> 相对码本 0 延迟 <i class="mono teal">i</i> 个时间步激活——形成一个阶梯。</p>
+      <p>它构成一个四阶段状态机:<b>延迟 → 活跃 → 收尾(码本 0 遇 EOS)→ 完成</b>。后续几乎所有 AR 与声码器优化,都必须绕着这个状态机做。</p>
+      <div class="legend">
+        <span class="a"><i></i>码本 0(结构)</span>
+        <span class="b"><i></i>已激活</span>
+        <span class="c"><i></i>等待延迟</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= 02 BOTTLENECK ================= -->
+<section id="bottleneck">
+  <div class="sec-head reveal"><span class="no">02</span><h2>Profiling:三处真正的瓶颈</h2></div>
+  <p class="sec-lede reveal">先测量,再动刀。性能分析揭示的瓶颈不在"大模型前向"本身,而在<b>被数百步放大的微小开销</b>。</p>
+  <div class="bn-grid">
+    <div class="bn reveal" data-no="壹">
+      <div class="b-tag">BOTTLENECK / 01</div>
+      <h3>AR 解码主导一切</h3>
+      <p>10 秒语音需要 400–800 个解码步。每步都有前向、头投影、采样与 D2H 同步——每步 0.1ms 的开销,端到端就是约 80ms。</p>
+      <div class="fig"><b>400–800</b>steps / 10s speech · 微秒被放大为毫秒</div>
+    </div>
+    <div class="bn reveal" data-no="贰" style="transition-delay:.1s">
+      <div class="b-tag">BOTTLENECK / 02</div>
+      <h3>编码器贵,但内容静态</h3>
+      <p>单次编码 50–100ms;而生产环境中,用户往往用同一个参考音色发送多个请求——同样的计算被反复执行。</p>
+      <div class="fig"><b>50–100ms</b>per encode · 重复音色 = 重复浪费</div>
+    </div>
+    <div class="bn reveal" data-no="叁" style="transition-delay:.2s">
+      <div class="b-tag">BOTTLENECK / 03</div>
+      <h3>声码器队头阻塞</h3>
+      <p>单次调用仅约 10ms,但高并发下多个 AR 循环同时完成:16 个请求各 15ms 串行解码,最后一个要白等 240ms。</p>
+      <div class="fig"><b>240ms</b>tail wait @16 并发 · 快内核 ≠ 快系统</div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= 03 OPTIMIZATION ================= -->
+<section id="opt">
+  <div class="sec-head reveal"><span class="no">03</span><h2>逐层手术:优化历程</h2></div>
+  <p class="sec-lede reveal">编码器靠<b>缓存消灭计算</b>,AR 解码靠 <b>CUDA Graph 消灭开销</b>,声码器靠<b>批处理与窗口化消灭排队</b>——最后沉淀为框架。</p>
+
+  <div class="timeline">
+    <!-- Phase 1 -->
+    <div class="t-item reveal">
+      <div class="dot">P1</div>
+      <div class="phase">Phase 1 · Encoder</div>
+      <h3><span class="layer">编码器</span>:最快的计算是不计算</h3>
+      <div class="t-body">
+        <p>引入 <b>LRU 缓存</b>存储参考音频的编码结果:同一音色再次出现时直接跳过编码器,立即取回预计算的延迟 token。</p>
+      </div>
+      <div class="callout">
+        <b>一次反向决策:</b>按长度分桶的在线批量编码,纸面上提升吞吐,实测却让 GPU 利用率从平稳变成间歇尖峰,与并发 AR 解码激烈争抢资源。最终把批量编码退役为<b>离线预热专用</b>,在线路径保持隔离——纸面优化 ≠ 生产优化。
+      </div>
+    </div>
+
+    <!-- Phase 2 -->
+    <div class="t-item reveal">
+      <div class="dot">P2</div>
+      <div class="phase">Phase 2 · AR Decode</div>
+      <h3><span class="layer">AR 解码</span>:微秒级的四步推进</h3>
+      <div class="t-body">
+        <p>核心战场。每步几十微秒的 kernel launch 与同步开销,在数百步里被无情放大——必须逐一拔除。</p>
+      </div>
+      <div class="moves">
+        <div class="move">
+          <div class="m-name"><span class="mk">MOVE 1</span>CUDA Graph 化整个解码循环</div>
+          <p>难点:Graph 要求执行路径完全静态,而延迟模式状态机满是 Python 分支。解法:把状态机改写为<b style="color:var(--paper)">固定地址上的原位张量操作</b>——预分配 <code>[max_batch, …]</code> 的延迟计数器、EOC 倒计时、完成标志等,每步原地覆盖;runner 把活跃请求状态 GPU→GPU 拷入"影子"缓冲区,Graph 重放后再散布回请求池。</p>
+        </div>
+        <div class="move">
+          <div class="m-name"><span class="mk">MOVE 2</span>合并 D2H 同步</div>
+          <p>基线每步做 3 次独立的 device-to-host 同步检查 token 与状态,3 次流水线停顿。改为把所有中间结果打包进单个 staging 张量,每步只做<b style="color:var(--paper)">一次合并传输</b>:<code>staging[:n].cpu()</code>。</p>
+        </div>
+        <div class="move">
+          <div class="m-name"><span class="mk">MOVE 3</span>异步一步先行(lookahead)解码</div>
+          <p>关键洞察:token 因果链可<b style="color:var(--paper)">完全在 GPU 上闭合</b>——无需等 CPU 处理第 t 步的采样结果,GPU 直接启动第 t+1 步。GPU 侧采样器池 + CPU/GPU ping-pong 共享缓冲区,单步流水重叠,主机传输开销被完全掩盖。</p>
+        </div>
+        <div class="move cut">
+          <div class="m-name"><span class="mk">CUT</span>评估后移除 torch.compile</div>
+          <p>手动 CUDA Graph 已消除绝大部分 launch 开销,torch.compile 只剩边际收益,却带来巨大的冷启动编译惩罚。<b style="color:var(--paper)">果断移除</b>——优化也包括做减法。</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Phase 3 -->
+    <div class="t-item reveal">
+      <div class="dot">P3</div>
+      <div class="phase">Phase 3 · Vocoder</div>
+      <h3><span class="layer">声码器</span>:批处理 + 窗口化流式</h3>
+      <div class="t-body">
+        <p><b>批量解码:</b>在 <code>max_batch_wait_ms=2ms</code> 的小窗口内攒请求,零填充到批内最大长度,一次 <code>decode_batch()</code> 解掉,再按 <code>length × samples_per_frame</code> 裁回真实长度。尾延迟问题解决。</p>
+        <p><b>窗口化流式</b>则难得多:神经编解码器在每个拼接边界会产生可听的"咔哒"声(卷积内部状态被切断);延迟模式下中途快照的尾行码本不完整,直接解码会注入噪声。不能照搬 LLM 的分块直觉。</p>
+      </div>
+      <div class="stride mono reveal">
+        <div class="blk stride-b"><div class="bar"></div>stride · 75 帧(≈1s)攒够才解码</div>
+        <div class="blk ovl"><div class="bar"></div>overlap · 8 帧回溯重解 + 交叉淡化</div>
+        <div class="blk hold"><div class="bar"></div>hold-back · 4 帧扣住未填满的尾行</div>
+      </div>
+      <div class="callout">
+        <b>不可压缩的启动成本:</b>延迟模式决定了声码器至少需要 N 行(N = 码本数)才能反转 pattern、产出第一帧音频。叠加 stride 后,实测流式 <b>TTFB ≈ 300–400ms</b>,仍低于 500ms 的会话体验阈值。
+      </div>
+    </div>
+
+    <!-- Phase 4 -->
+    <div class="t-item reveal">
+      <div class="dot">P4</div>
+      <div class="phase">Phase 4 · System</div>
+      <h3><span class="layer">框架化</span>:沉淀为 SGLang-Omni</h3>
+      <div class="t-body">
+        <p>把单模型的手术经验泛化为<b>多阶段异构生成框架</b>:配置静态声明流水线阶段、GPU 放置与进程拓扑,Coordinator 负责阶段间路由。</p>
+      </div>
+      <div class="moves">
+        <div class="move">
+          <div class="m-name"><span class="mk">SCHED</span>每阶段独立选调度器</div>
+          <p>AR 阶段用 <code>OmniScheduler</code>(继承 SGLang 连续批处理、KV 缓存、RadixAttention、CUDA Graph);编码器/聚合器用 <code>SimpleScheduler</code>;流式阶段用 <code>StreamingSimpleScheduler</code>。</p>
+        </div>
+        <div class="move">
+          <div class="m-name"><span class="mk">CACHE</span>按参考音频分区的前缀缓存</div>
+          <p>RadixAttention 以 <code>extra_key</code> 命名空间按参考音频分区,同音色请求复用前缀 KV。</p>
+        </div>
+        <div class="move">
+          <div class="m-name"><span class="mk">MEM</span>显存即阶段级资源合约</div>
+          <p>每个阶段声明 <code>total_gpu_memory_fraction</code>,启动前按 GPU 求和校验预算——而不是交给全局调度器的一个分数,避免阶段间打架。</p>
+        </div>
+        <div class="move">
+          <div class="m-name"><span class="mk">COMM</span>分层通信平面</div>
+          <p>控制消息走 ZMQ/msgpack 控制面;张量走 relay 数据面(shm / nccl / nixl / mooncake);同 GPU 走 CUDA IPC。SSE 真流式调度器进一步压低首音频延迟。</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= 04 BENCH ================= -->
+<section id="bench">
+  <div class="sec-head reveal"><span class="no">04</span><h2>实测:单卡 H100</h2></div>
+  <p class="sec-lede reveal">Seed-TTS EN 完整集(N=1088,3 轮均值),bf16 + CUDA Graph,<code class="mono" style="color:var(--teal)">max_running_requests=16</code>。RTF&lt;1 即快于实时。</p>
+  <div class="bench-wrap">
+    <div class="reveal">
+      <table>
+        <thead><tr><th>并发</th><th>吞吐 req/s</th><th>平均延迟</th><th>RTF / req</th><th>audio s/s</th></tr></thead>
+        <tbody>
+          <tr><td>1</td><td>1.62</td><td>617 ms</td><td>0.147</td><td>6.89</td></tr>
+          <tr><td>2</td><td>2.70</td><td>742 ms</td><td>0.180</td><td>11.37</td></tr>
+          <tr><td>4</td><td>5.45</td><td>733 ms</td><td>0.177</td><td>22.84</td></tr>
+          <tr><td>8</td><td>8.91</td><td>898 ms</td><td>0.217</td><td>37.38</td></tr>
+          <tr><td>16</td><td>14.74</td><td>1079 ms</td><td>0.262</td><td>61.84</td></tr>
+        </tbody>
+      </table>
+      <p class="tbl-note">// 质量基准:Seed-TTS 1.11 · CV3(9 语)4.41 · MiniMax-Multilingual(23 语)2.74 · Higgs-Multilingual(111 语)3.61 WER/CER</p>
+    </div>
+    <div class="reveal" style="transition-delay:.15s">
+      <div class="bars-title">AUDIO THROUGHPUT — 每秒产出的音频秒数</div>
+      <div class="bbar"><div class="lab"><span>并发 1</span><b>6.89</b></div><div class="track"><div class="fill" data-w="11.1%"></div></div></div>
+      <div class="bbar"><div class="lab"><span>并发 2</span><b>11.37</b></div><div class="track"><div class="fill" data-w="18.4%"></div></div></div>
+      <div class="bbar"><div class="lab"><span>并发 4</span><b>22.84</b></div><div class="track"><div class="fill" data-w="36.9%"></div></div></div>
+      <div class="bbar"><div class="lab"><span>并发 8</span><b>37.38</b></div><div class="track"><div class="fill" data-w="60.4%"></div></div></div>
+      <div class="bbar hot"><div class="lab"><span>并发 16</span><b>61.84</b></div><div class="track"><div class="fill" data-w="100%"></div></div></div>
+      <div class="rtf-pill"><span class="big">RTF 0.147 → 0.262</span><span>并发 ×16,实时率仍远低于 1.0</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= 05 LESSONS ================= -->
+<section id="lessons">
+  <div class="sec-head reveal"><span class="no">05</span><h2>五条工程启示</h2></div>
+  <div class="lesson-list">
+    <div class="lesson reveal">
+      <div class="ln">壹</div>
+      <div><h3>先测量,再动刀<span class="en">PROFILE FIRST</span></h3>
+      <p>瓶颈不在"大模型前向",而在每步几十微秒的 launch 与同步开销 × 数百步的<b>放大效应</b>。直觉会骗人,profiler 不会。</p></div>
+    </div>
+    <div class="lesson reveal">
+      <div class="ln">贰</div>
+      <div><h3>逐层各个击破<span class="en">LAYER BY LAYER</span></h3>
+      <p>编码器用缓存<b>消灭计算</b>,AR 解码用 CUDA Graph + 合并同步 + 异步先行<b>消灭开销</b>,声码器用批处理 + 窗口流式<b>消灭排队</b>。</p></div>
+    </div>
+    <div class="lesson reveal">
+      <div class="ln">叁</div>
+      <div><h3>尊重领域特性<span class="en">DOMAIN MATTERS</span></h3>
+      <p>音频不是文本:延迟模式状态机、拼接点击声、码本不完整噪声——优化必须为音频<b>量身定制</b>,照搬 LLM 套路会出声学事故。</p></div>
+    </div>
+    <div class="lesson reveal">
+      <div class="ln">肆</div>
+      <div><h3>敢做减法<span class="en">DARE TO CUT</span></h3>
+      <p>放弃在线批量编码、移除 torch.compile,都基于<b>生产实测</b>而非纸面收益。删掉的代码也是优化。</p></div>
+    </div>
+    <div class="lesson reveal">
+      <div class="ln">伍</div>
+      <div><h3>沉淀为框架<span class="en">GENERALIZE</span></h3>
+      <p>从单模型手术升级为 SGLang-Omni 通用多阶段框架:新模型接入 = <b>声明拓扑 + 插钩子</b>。已支持 Fish Audio S2-Pro、Qwen3-TTS、MOSS-TTS、Qwen3-Omni 等。</p></div>
+    </div>
+  </div>
+
+  <blockquote class="reveal">
+    "最好的系统优化不来自盲目套用流行技术,<br>
+    而来自<span class="hl">对理论的深刻理解</span>、对优雅系统的追求,<br>
+    以及清晰的工程权衡。"
+    <footer>— TTS OPTIMIZATION NOTES · SGLANG-OMNI</footer>
+  </blockquote>
+</section>
+
+<footer class="site">
+  <div class="src">
+    <b>SOURCES / 资料来源</b>
+    <a href="https://github.com/zhaochenyang20/Awesome-ML-SYS-Tutorial/blob/main/sglang/sglang-omni/tts-optimization.md" target="_blank">① Awesome-ML-SYS-Tutorial · TTS Optimization 工程笔记</a>
+    <a href="https://www.lmsys.org/blog/2026-06-04-higgs-audio-v3-tts/" target="_blank">② LMSYS Blog · Higgs Audio v3 TTS on SGLang-Omni(2026-06-04)</a>
+  </div>
+  <div class="sig">BOSON AI × SGLANG-OMNI<br>RTF 0.147 · H100 ×1 · 2026</div>
+</footer>
+
+<script>
+// hero waveform bars
+(function(){
+  const c=document.getElementById('waveBars');
+  const n=Math.min(120,Math.floor(window.innerWidth/11));
+  for(let i=0;i<n;i++){
+    const b=document.createElement('i');
+    const h=18+Math.abs(Math.sin(i*.32))*62+Math.random()*18;
+    b.style.height=h+'px';
+    b.style.animationDelay=(i*.045)+'s';
+    b.style.animationDuration=(1.2+Math.random()*1.2)+'s';
+    c.appendChild(b);
+  }
+})();
+
+// delay-pattern grid: 8 codebooks × 12 steps, codebook i activates at step i
+(function(){
+  const g=document.getElementById('delayGrid');
+  const COLS=12;
+  let h='<span class="rl"></span>';
+  for(let t=0;t<COLS;t++)h+='<span class="ch">t'+t+'</span>';
+  for(let cb=0;cb<8;cb++){
+    h+='<span class="rl">码本 '+cb+'</span>';
+    for(let t=0;t<COLS;t++){
+      const on=t>=cb;
+      const cls=on?(cb===0?'cell first':'cell on'):'cell';
+      const d=(cb*0.06+t*0.05).toFixed(2);
+      h+='<span class="'+cls+'" style="animation-delay:'+d+'s"></span>';
+    }
+  }
+  g.innerHTML=h;
+})();
+
+// scroll reveal + bar fills
+(function(){
+  const io=new IntersectionObserver(es=>{
+    es.forEach(e=>{
+      if(e.isIntersecting){
+        e.target.classList.add('in');
+        e.target.querySelectorAll('.fill').forEach(f=>{f.style.width=f.dataset.w});
+        io.unobserve(e.target);
+      }
+    });
+  },{threshold:.18});
+  document.querySelectorAll('.reveal').forEach(el=>io.observe(el));
+})();
+</script>
+</body>
+</html>
