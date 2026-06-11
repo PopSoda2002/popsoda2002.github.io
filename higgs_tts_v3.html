@@ -805,13 +805,20 @@ footer.site .sig{font-family:var(--mono);font-size:11px;letter-spacing:.15em;tex
           <p class="fig-cap">Request 2 reuses voice A: the 80ms encode collapses to a <b>cache lookup</b>. Voice B misses and pays full price.</p>
           <div class="pr-row"><a class="pr" href="https://github.com/sgl-project/sglang-omni/issues/562" target="_blank">#562</a><a class="pr" href="https://github.com/sgl-project/sglang-omni/pull/563" target="_blank">#563</a><a class="pr" href="https://github.com/sgl-project/sglang-omni/pull/605" target="_blank">#605</a></div>
         </div>
+        <div class="move">
+          <div class="m-name"><span class="mk">COMPILE</span>torch.compile on the encoder</div>
+          <p>Static shapes, a convolutional stack, no branching — the textbook compile workload. Inductor <b>fuses</b> the small kernels into fewer, larger ones.</p>
+          <div class="tl" id="tlFuse"></div>
+          <p class="fig-cap">Same math, fewer launches, earlier finish. On a cache miss this stacks with the LRU above.</p>
+          <div class="pr-row"><a class="pr" href="https://github.com/sgl-project/sglang-omni/pull/612" target="_blank">#612</a></div>
+        </div>
         </div>
     </div>
   </div>
 
   <!-- AR -->
   <div class="dive reveal">
-    <div class="dive-head"><span class="sno">C</span><h3>AR Engine <span class="en">— CUDA graphs, radix cache, paged attention</span></h3></div>
+    <div class="dive-head"><span class="sno">C</span><h3>AR Engine <span class="en">— paged attention, radix cache, CUDA graphs</span></h3></div>
     <div class="dive-meta">Qwen3-4B backbone · fused 8-codebook head · 400–800 steps per 10s of speech</div>
     <div class="dive-grid">
       <div class="dive-what"><div class="dw-text">
@@ -824,6 +831,24 @@ footer.site .sig{font-family:var(--mono);font-size:11px;letter-spacing:.15em;tex
         </div>
       </div>
       <div class="moves">
+        <div class="move">
+          <div class="m-name"><span class="mk">PAGED</span>Paged attention for free</div>
+          <p>KV lives in fixed-size pages — no fragmentation, no over-reservation. That's what lets <b>16 AR loops</b> share one H100 with the encoder and vocoder. Inherited free by reusing <code>OmniScheduler</code>.</p>
+          <div class="mem" id="memAnim">
+            <div class="mem-row"><span class="mem-lab">contiguous</span><div class="mem-cells" id="memCont"></div></div>
+            <div class="mem-status" id="memContStatus"></div>
+            <div class="mem-row" style="margin-top:16px"><span class="mem-lab">paged</span><div class="mem-cells" id="memPage"></div></div>
+            <div class="mem-status" id="memPageStatus"></div>
+          </div>
+          <p class="fig-cap">A finishes, D needs 10 blocks: contiguous <b class="bad">rejects</b> (free but fragmented); paged scatters D across whatever is free.</p>
+          <div class="pr-row"><a class="pr" href="https://github.com/sgl-project/sglang-omni/pull/476" target="_blank">#476</a></div>
+        </div>
+        <div class="move">
+          <div class="m-name"><span class="mk">RADIX</span>Radix cache, partitioned by voice</div>
+          <p><b>RadixAttention</b> keeps prior KV in a prefix tree; in TTS the shared prefix is the <b>reference voice</b>, namespaced via <code>extra_key</code>. It stacks with the encoder LRU: a repeated voice skips both the encode and the prefill.</p>
+          <div class="tl" id="tlRadix"></div>
+          <p class="fig-cap">Same shape as the LRU figure — that's the point: the two caches <b>stack</b>.</p>
+        </div>
         <div class="move concept">
           <div class="m-name"><span class="mk">CONCEPT</span>What a CUDA graph actually is</div>
           <p>Each kernel launch costs the CPU <b>5–10µs</b>; a step of dozens of tiny kernels leaves the GPU starving between them. A <b>CUDA graph</b> records the sequence once and replays it as a <b>single launch</b>:</p>
@@ -836,29 +861,11 @@ footer.site .sig{font-family:var(--mono);font-size:11px;letter-spacing:.15em;tex
           <p>Two follow-ups. The three per-step D2H syncs, <b>merged into one</b> —</p>
           <div class="tl" id="tlD2h"></div>
           <p class="fig-cap">Each red tick is a device-to-host sync — a full pipeline stall. Packing tokens + state into one staging tensor leaves <b>one stall per step instead of three</b>.</p>
-          <p>— and <b>async one-step lookahead</b>: the token causal chain closes on the GPU, so step t+1 launches before the CPU touches step t:</p>
-          <div class="tl" id="tlBlock"><div class="tl-title bad"><b>✕ BLOCKING</b> — GPU waits for the CPU after every step</div></div>
-          <div class="tl" id="tlAhead"><div class="tl-title good"><b>✓ ONE-STEP LOOKAHEAD</b> — CPU work hides under the next GPU step</div></div>
-          <p class="fig-cap">Together these drive single-request RTF to <b>0.147</b>.</p>
+          <p>— and <b>async one-step lookahead</b>. After every step the CPU still has bookkeeping: read the sampled tokens, update request state, detect finished requests. But the GPU doesn't need any of that to continue — <b>the next token depends only on data already on the GPU</b> (the sampler pool holds each request's last codes). So the GPU starts step t+1 immediately, and the CPU does its step-t bookkeeping in parallel:</p>
+          <div class="tl" id="tlBlock"><div class="tl-title bad"><b>✕ BLOCKING</b> — GPU sits idle after every step, waiting for CPU bookkeeping</div></div>
+          <div class="tl" id="tlAhead"><div class="tl-title good"><b>✓ ONE-STEP LOOKAHEAD</b> — GPU steps run back-to-back; CPU bookkeeping overlaps them</div></div>
+          <p class="fig-cap">"Hides under the next GPU step" = the CPU's work happens <b>during</b> GPU step t+1 instead of between steps, so it costs zero wall-clock. Together these drive single-request RTF to <b>0.147</b>.</p>
           <div class="pr-row"><a class="pr" href="https://github.com/sgl-project/sglang-omni/issues/564" target="_blank">#564</a><a class="pr" href="https://github.com/sgl-project/sglang-omni/pull/572" target="_blank">#572</a><a class="pr" href="https://github.com/sgl-project/sglang-omni/pull/590" target="_blank">#590</a></div>
-        </div>
-        <div class="move">
-          <div class="m-name"><span class="mk">RADIX</span>Radix cache, partitioned by voice</div>
-          <p><b>RadixAttention</b> keeps prior KV in a prefix tree; in TTS the shared prefix is the <b>reference voice</b>, namespaced via <code>extra_key</code>. It stacks with the encoder LRU: a repeated voice skips both the encode and the prefill.</p>
-          <div class="tl" id="tlRadix"></div>
-          <p class="fig-cap">Same shape as the LRU figure — that's the point: the two caches <b>stack</b>.</p>
-        </div>
-        <div class="move">
-          <div class="m-name"><span class="mk">PAGED</span>Paged attention for free</div>
-          <p>KV lives in fixed-size pages — no fragmentation, no over-reservation. That's what lets <b>16 AR loops</b> share one H100 with the encoder and vocoder. Inherited free by reusing <code>OmniScheduler</code>.</p>
-          <div class="mem" id="memAnim">
-            <div class="mem-row"><span class="mem-lab">contiguous</span><div class="mem-cells" id="memCont"></div></div>
-            <div class="mem-status" id="memContStatus"></div>
-            <div class="mem-row" style="margin-top:16px"><span class="mem-lab">paged</span><div class="mem-cells" id="memPage"></div></div>
-            <div class="mem-status" id="memPageStatus"></div>
-          </div>
-          <p class="fig-cap">A finishes, D needs 10 blocks: contiguous <b class="bad">rejects</b> (free but fragmented); paged scatters D across whatever is free.</p>
-          <div class="pr-row"><a class="pr" href="https://github.com/sgl-project/sglang-omni/pull/476" target="_blank">#476</a></div>
         </div>
         </div>
     </div>
@@ -1113,6 +1120,15 @@ tlMake('tlPre',{period:7,lanes:[
   {label:'separate stage',segs:[{t0:.02,t1:.16,cls:'c-cpu',label:'preprocess'},{t0:.16,t1:.34,cls:'c-sync',label:'serialize · IPC · queue'},{t0:.34,t1:.58,cls:'c-enc',label:'encode'}],marks:[{t:.58,html:'encode done',dim:true}]},
   {label:'fused (#576)',segs:[{t0:.02,t1:.16,cls:'c-cpu',label:'preprocess'},{t0:.16,t1:.40,cls:'c-enc',label:'encode — same process, no hop'}],marks:[{t:.40,html:'done sooner — hop deleted'}]}
 ]});
+
+/* 04A — encoder torch.compile: kernel fusion */
+(function(){
+  const eager=[];for(let i=0;i<8;i++)eager.push({t0:.02+i*.085,t1:.075+i*.085,cls:'c-kern',label:i===0?'small kernels':''});
+  tlMake('tlFuse',{period:7,lanes:[
+    {label:'eager',segs:eager,marks:[{t:.70,html:'done',dim:true}]},
+    {label:'compiled',segs:[{t0:.02,t1:.17,cls:'c-kern',label:'fused'},{t0:.17,t1:.32,cls:'c-kern',label:'fused'},{t0:.32,t1:.44,cls:'c-kern',label:'fused'}],marks:[{t:.44,html:'done — fewer launches'}]}
+  ]});
+})();
 
 /* 04A — encoder: LRU cache hit vs miss */
 tlMake('tlLru',{period:8,lanes:[
