@@ -721,7 +721,7 @@ footer.site .sig{font-family:var(--mono);font-size:11px;letter-spacing:.15em;tex
         <h3>3 · AR Engine</h3>
         <p>Qwen3-4B backbone emits 8 codebook tokens per step under the delay pattern. 400–800 steps per 10s of speech.</p>
         <span class="mono-note">step-by-step → [B, 8, V]</span>
-        <div class="opts"><span>CUDA graph</span><span>radix cache</span><span>paged attention</span><span>merged D2H</span><span>async lookahead</span></div>
+        <div class="opts"><span>CUDA graph</span><span>radix cache</span><span>paged attention</span><span>merged D2H</span></div>
       </div>
       <div class="node">
         <span class="tag gpu">GPU · FAST BUT QUEUE-PRONE</span>
@@ -857,15 +857,11 @@ footer.site .sig{font-family:var(--mono);font-size:11px;letter-spacing:.15em;tex
           <p class="fig-cap">The recording is <b class="bad">frozen</b> — so the delay-pattern state machine was rewritten as branchless, in-place tensor ops on fixed buffers: control flow turned into data flow. (<a href="https://github.com/sgl-project/sglang-omni/pull/503" target="_blank" style="border:none">#503</a>)</p>
         </div>
         <div class="move">
-          <div class="m-name"><span class="mk">GAIN</span>What it bought — plus two follow-ups</div>
-          <p>Two follow-ups. The three per-step D2H syncs, <b>merged into one</b> —</p>
+          <div class="m-name"><span class="mk">D2H</span>Merge three syncs into one</div>
+          <p>The baseline checked tokens and state with <b>three</b> separate device-to-host syncs per step. All of it now lands in one staging tensor and crosses in a single transfer.</p>
           <div class="tl" id="tlD2h"></div>
-          <p class="fig-cap">Each red tick is a device-to-host sync — a full pipeline stall. Packing tokens + state into one staging tensor leaves <b>one stall per step instead of three</b>.</p>
-          <p>— and <b>async one-step lookahead</b>. After every step the CPU still has bookkeeping: read the sampled tokens, update request state, detect finished requests. But the GPU doesn't need any of that to continue — <b>the next token depends only on data already on the GPU</b> (the sampler pool holds each request's last codes). So the GPU starts step t+1 immediately, and the CPU does its step-t bookkeeping in parallel:</p>
-          <div class="tl" id="tlBlock"><div class="tl-title bad"><b>✕ BLOCKING</b> — GPU sits idle after every step, waiting for CPU bookkeeping</div></div>
-          <div class="tl" id="tlAhead"><div class="tl-title good"><b>✓ ONE-STEP LOOKAHEAD</b> — GPU steps run back-to-back; CPU bookkeeping overlaps them</div></div>
-          <p class="fig-cap">"Hides under the next GPU step" = the CPU's work happens <b>during</b> GPU step t+1 instead of between steps, so it costs zero wall-clock. Together these drive single-request RTF to <b>0.147</b>.</p>
-          <div class="pr-row"><a class="pr" href="https://github.com/sgl-project/sglang-omni/issues/564" target="_blank">#564</a><a class="pr" href="https://github.com/sgl-project/sglang-omni/pull/572" target="_blank">#572</a><a class="pr" href="https://github.com/sgl-project/sglang-omni/pull/590" target="_blank">#590</a></div>
+          <p class="fig-cap">Each red tick is a D2H sync — a full pipeline stall. One staging tensor leaves <b>one stall per step instead of three</b>. With the CUDA graph above, single-request RTF lands at <b>0.147</b>.</p>
+          <div class="pr-row"><a class="pr" href="https://github.com/sgl-project/sglang-omni/issues/564" target="_blank">#564</a><a class="pr" href="https://github.com/sgl-project/sglang-omni/pull/572" target="_blank">#572</a></div>
         </div>
         </div>
     </div>
@@ -1104,16 +1100,6 @@ tlMake('tlAsync',{period:9,lanes:[
     {label:'GPU',segs:pk,marks:[{t:.41,html:'step done — ~2× sooner'}]}
   ]});
 })();
-
-/* 04B — blocking vs one-step lookahead */
-tlMake('tlBlock',{period:7,lanes:[
-  {label:'GPU',segs:[{t0:.00,t1:.18,cls:'c-ar',label:'step t'},{t0:.26,t1:.44,cls:'c-ar',label:'step t+1'},{t0:.52,t1:.70,cls:'c-ar',label:'step t+2'}]},
-  {label:'CPU',segs:[{t0:.18,t1:.26,cls:'c-cpu',label:'process'},{t0:.44,t1:.52,cls:'c-cpu',label:'process'},{t0:.70,t1:.78,cls:'c-cpu',label:'process'}],marks:[{t:.78,html:'3 steps · 78% of period'}]}
-]});
-tlMake('tlAhead',{period:7,lanes:[
-  {label:'GPU',segs:[{t0:.00,t1:.18,cls:'c-ar',label:'step t'},{t0:.18,t1:.36,cls:'c-ar',label:'step t+1'},{t0:.36,t1:.54,cls:'c-ar',label:'step t+2'}]},
-  {label:'CPU',segs:[{t0:.19,t1:.27,cls:'c-cpu',label:'process t'},{t0:.37,t1:.45,cls:'c-cpu',label:'t+1'}],marks:[{t:.54,html:'3 steps · 54% — CPU hidden'}]}
-]});
 
 /* 04A — preprocessing: stage hop vs fused */
 tlMake('tlPre',{period:7,lanes:[
