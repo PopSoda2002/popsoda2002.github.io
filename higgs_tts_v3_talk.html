@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Speaker Script — Higgs Audio v3 TTS 4B</title>
+<title>Speaker Script — Inference Optimization Journey · Higgs Audio v3 TTS</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Marcellus&family=Plus+Jakarta+Sans:ital,wght@0,300;0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -83,18 +83,13 @@ b{color:var(--paper);font-weight:500}
 }
 .page h2 .en{color:var(--green-soft)}
 .script p{
-  font-size:clamp(15px,1.45vw,19px);line-height:1.95;color:var(--paper-soft);
-  margin-bottom:18px;max-width:880px;
+  font-size:clamp(15px,1.5vw,19.5px);line-height:1.95;color:var(--paper-soft);
+  margin-bottom:18px;max-width:900px;
 }
 .script p.beat{
   border-left:3px solid var(--green);padding-left:18px;
-  font-family:var(--display);font-size:clamp(15px,1.4vw,18.5px);color:var(--paper);
+  font-family:var(--display);font-size:clamp(15px,1.45vw,19px);color:var(--paper);
 }
-.script .aside{
-  font-family:var(--mono);font-size:12px;color:var(--paper-faint);
-  border:1px dashed var(--line-2);padding:10px 16px;max-width:880px;margin-bottom:18px;line-height:1.8;
-}
-.script .aside b{color:var(--green-soft)}
 /* cover */
 .page.cover{align-items:flex-start;text-align:left}
 .page.cover h1{
@@ -106,7 +101,7 @@ b{color:var(--paper);font-weight:500}
 .page.cover .meta{font-family:var(--mono);font-size:12px;letter-spacing:.18em;color:var(--paper-faint);line-height:2.2}
 .page.cover .meta b{color:var(--green);font-weight:600}
 /* qa */
-.qa{max-width:900px}
+.qa{max-width:920px}
 .qa .q{font-weight:600;color:var(--paper);font-size:clamp(14px,1.35vw,17px);margin-top:18px}
 .qa .q::before{content:"Q · ";color:var(--blue);font-family:var(--mono);font-size:.9em}
 .qa .a{font-size:clamp(13.5px,1.25vw,16px);line-height:1.85;color:var(--paper-dim);margin-top:4px}
@@ -119,273 +114,133 @@ b{color:var(--paper);font-weight:500}
 <body>
 
 <div class="progress" id="prog"></div>
-<div class="topbar"><span>HIGGS·AUDIO·V3·TTS·4B <b>/ SPEAKER SCRIPT</b></span><span id="secLabel">OPENING</span></div>
+<div class="topbar"><span>HIGGS·AUDIO·V3·TTS <b>/ INFERENCE · SPEAKER SCRIPT</b></span><span id="secLabel">INFERENCE</span></div>
 <button class="navbtn prev" id="btnPrev">←</button>
 <button class="navbtn next" id="btnNext">→</button>
 <div class="hint">← → / SPACE to navigate · HOME/END to jump</div>
-<div class="counter"><b id="cur">1</b> / <span id="tot">23</span></div>
+<div class="counter"><b id="cur">1</b> / <span id="tot">10</span></div>
 
 <div class="deck" id="deck">
 
-<!-- 1 -->
-<section class="page cover" data-sec="OPENING">
-  <h1>The Speaker Script<span class="l2">Higgs Audio v3 TTS 4B</span></h1>
-  <p class="sub">How We Build Fast, Modern Voice Cloning — one page per slide, ~12–14 minutes plus Q&amp;A.</p>
+<!-- 1: cover -->
+<section class="page cover" data-sec="INFERENCE">
+  <h1>Inference<span class="l2">Optimization Journey</span></h1>
+  <p class="sub">Speaker script · slides 11–18 of the Higgs Audio v3 TTS deck · ~7 minutes.</p>
   <div class="meta">
-    BOSON AI TEAM · 2026-06<br>
-    NAVIGATE WITH <b>←  →</b> OR <b>SPACE</b> · 22 SLIDES + Q&amp;A PREP
+    NAVIGATE WITH <b>←  →</b> OR <b>SPACE</b> · 8 SLIDES + Q&amp;A PREP<br>
+    CORE SLIDE: <b>AR ENGINE (~100s)</b> · CLOSING NUMBER: <b>RTF 0.147 · 61.8 AUDIO S/S</b>
   </div>
 </section>
 
-<!-- 2: slide 1 -->
-<section class="page" data-sec="OPENING">
-  <div class="slide-tag">Slide 1 · Title<span class="tm">~40s</span></div>
-  <h2>How We Build <span class="en">Fast, Modern Voice Cloning</span></h2>
-  <div class="script">
-    <p>Hi everyone, thanks for joining. I'm from the Boson AI team, and today I want to walk you through Higgs Audio v3 TTS — how we built fast, modern voice cloning.</p>
-    <p class="beat">One sentence before we start, because it's the reason this project exists: we believe voice is the definitive interface for what's coming next — and we believe it belongs to the open ecosystem.</p>
-    <p>The weights are open, the serving stack is open, and everything I show you today is something you can run yourself.</p>
-  </div>
-</section>
-
-<!-- 3: slide 2 -->
-<section class="page" data-sec="OPENING">
-  <div class="slide-tag">Slide 2 · Getting Started<span class="tm">~30s</span></div>
-  <h2>The <span class="en">AGENTS.md</span> Prompt</h2>
-  <div class="script">
-    <p>Before the deep dive — if you only remember one slide, make it this one.</p>
-    <p>The model ships with an <code>AGENTS.md</code> on Hugging Face, written specifically for AI assistants to read. So the fastest way to learn this model is: copy this prompt, paste it into your favorite LLM, and let it explain the architecture and walk you through the integration.</p>
-    <p class="beat">Documentation that your copilot reads for you. That's the spirit of the whole release: lower the barrier to zero.</p>
-  </div>
-</section>
-
-<!-- 4: slide 3 -->
-<section class="page" data-sec="OPENING">
-  <div class="slide-tag">Slide 3 · Inline Control Tags<span class="tm">~50s</span></div>
-  <h2>Granular Control via <span class="en">Inline Tags</span></h2>
-  <div class="script">
-    <p>So what does it actually feel like to use?</p>
-    <p>Higgs v3 gives you granular control over the generated speech through inline tags, right inside the text. You write <code>&lt;|emotion:elation|&gt;</code> and the voice lights up. You write <code>&lt;|style:whispering|&gt;</code> mid-sentence, and it drops to a whisper — same speaker, same sentence. <code>&lt;|prosody:speed_slow|&gt;</code> slows it down.</p>
-    <p>There are over twenty emotions, styles like singing and shouting, prosody controls for speed, pitch and pauses, even sound events like laughter and sighs. They compose, they switch seamlessly mid-sentence — and this works across more than <b>110 languages</b>.</p>
-  </div>
-</section>
-
-<!-- 5: slide 4 -->
-<section class="page" data-sec="OPENING">
-  <div class="slide-tag">Slide 4 · Five Doors<span class="tm">~40s</span></div>
-  <h2>Getting Started: <span class="en">If You Want To…</span></h2>
-  <div class="script">
-    <p>Five doors into the project, depending on who you are.</p>
-    <p>If you just want to hear it — the live demo at <b>boson.ai/workspace/avatar</b>, preset voices and avatars, zero setup. If you're a developer — the API docs; you can clone your own voice with a few seconds of reference audio. If you care about privacy — self-host it; the LMSYS blog post walks through local deployment. The weights are on Hugging Face, and the technical blog covers everything else.</p>
-    <p class="beat">Pick your door. They all lead to the same model.</p>
-  </div>
-</section>
-
-<!-- 6: slide 5 -->
-<section class="page" data-sec="OPENING">
-  <div class="slide-tag">Slide 5 · Agenda<span class="tm">~15s</span></div>
-  <h2>Things <span class="en">Not</span> Covered in AGENTS.md</h2>
-  <div class="script">
-    <p>Everything in AGENTS.md, I'm <b>not</b> going to repeat today. What I will cover is what's not in there: first the model and how we evaluate it, then — the part I'm most excited about — the inference system, and then Q&amp;A.</p>
-  </div>
-</section>
-
-<!-- 7: slide 6 -->
-<section class="page" data-sec="MODEL & EVALUATION">
-  <div class="slide-tag">Slide 6 · The TTS Landscape<span class="tm">~70s</span></div>
-  <h2>Positioning <span class="en">Higgs 4B</span></h2>
-  <div class="script">
-    <p>Let me position Higgs in the landscape, because TTS in 2026 is crowded.</p>
-    <p>On the scale axis, models run from Kokoro at 82 million parameters up to MOSS-1.5 at 8 billion. Higgs v3 sits at <b>4B — deliberately</b>. Big enough for expressiveness across 110 languages; small enough to serve fast on a single GPU.</p>
-    <p>On the architecture axis there are four families. Mel-based models — the FastSpeech, VITS generation. Pure flow and diffusion models like F5-TTS. Then the LM-based families: AR language model plus a flow or diffusion decoder — that's CosyVoice, VibeVoice — and AR language model plus a discrete codec — VALL-E, Fish Speech, and Higgs.</p>
-    <p class="beat">We bet on AR + codec, and the reason is systems-shaped: when speech is just discrete tokens from a language model, every trick the LLM serving world has built becomes available to TTS. Keep that thought — it's the whole second half of this talk.</p>
-  </div>
-</section>
-
-<!-- 8: slide 7 -->
-<section class="page" data-sec="MODEL & EVALUATION">
-  <div class="slide-tag">Slide 7 · Codec Architecture<span class="tm">~55s</span></div>
-  <h2>The <span class="en">Higgs Codec</span> Tokenizer</h2>
-  <div class="script">
-    <p>The first half of the bet: the codec. The Higgs Codec Tokenizer turns waveforms into tokens and back, with about <b>200 million parameters</b>.</p>
-    <p>It's a dual-path design. A semantic encoder — Wav2Vec — captures <b>what</b> is being said, supervised against a frozen teacher with a semantic loss. An acoustic encoder captures <b>how</b> it sounds. The two paths are concatenated and quantized by an eight-layer residual vector quantizer — RVQ — which gives us <b>eight codebooks per frame, at 25 frames per second</b>. Decoders on the other side reconstruct the waveform with both semantic and acoustic losses.</p>
-    <p class="beat">So every audio frame becomes eight small integers that carry both meaning and texture. That's what the language model learns to predict.</p>
-  </div>
-</section>
-
-<!-- 9: slide 8 -->
-<section class="page" data-sec="MODEL & EVALUATION">
-  <div class="slide-tag">Slide 8 · The AR Model<span class="tm">~55s</span></div>
-  <h2>The <span class="en">Autoregressive</span> TTS Model</h2>
-  <div class="script">
-    <p>The second half: the AR model itself. It's a roughly 4-billion-parameter decoder — 36 layers, hidden size 2560, grouped-query attention 32-to-8 — consuming interleaved text and audio tokens.</p>
-    <p>A few engineering details worth calling out. The eight codebook embeddings are <b>fused into a single tensor, tied with the text embedding</b> — one lookup, one head, instead of eight. Context is 8K tokens, which matters because generation is multi-turn: reference text, reference audio, then alternating text and audio chunks, each new chunk conditioned on everything before it.</p>
-    <p>That's what makes the cloning zero-shot and the streaming conversational. Output is 24 kHz audio at 25 fps — 40 milliseconds per frame.</p>
-  </div>
-</section>
-
-<!-- 10: slide 9 -->
-<section class="page" data-sec="MODEL & EVALUATION">
-  <div class="slide-tag">Slide 9 · The Delay Pattern<span class="tm">~55s</span></div>
-  <h2>Delay Pattern: <span class="en">Accelerate Token Prediction</span></h2>
-  <div class="script">
-    <p>Now, eight codebooks per frame creates a sequencing problem, and the delay pattern is the elegant fix.</p>
-    <p>The naive option is to flatten: predict all eight tokens of frame one, then all eight of frame two. Your sequence is now eight times longer — eight times the decode steps. Unacceptable.</p>
-    <p>The delay pattern instead offsets each codebook diagonally: codebook k starts k steps after codebook zero. After a seven-step ramp, every single step emits eight tokens in parallel — one per codebook — and the sequence stays <b>T plus seven instead of T times eight</b>. The coarse codebook leads, carrying pitch and intonation; the fine ones trail, adding texture.</p>
-    <p class="beat">One step per audio frame. That's the acceleration.</p>
-  </div>
-</section>
-
-<!-- 11: slide 10 -->
-<section class="page" data-sec="MODEL & EVALUATION">
-  <div class="slide-tag">Slide 10 · Evaluation<span class="tm">~45s</span></div>
-  <h2>How Do We Know <span class="en">It's Good?</span></h2>
-  <div class="script">
-    <p>Two axes.</p>
-    <p>First, fidelity of zero-shot voice cloning, on the industry-standard suites — SeedTTS, CV3-eval, Minimax-eval, and our own Higgs-multilingual-eval covering <b>111 languages and dialects</b>. We hold single-digit word and character error rates across the board.</p>
-    <p>Second — and this is where most TTS models fall apart — the hard, interactive stuff. Emergent TTS-eval covers emotion, paralinguistics, foreign words mid-sentence, questions, tricky syntax, complex pronunciation.</p>
-    <p class="beat">If you want a TTS model for real conversations rather than audiobook narration, this second column is the one to look at.</p>
-  </div>
-</section>
-
-<!-- 12: slide 11 -->
+<!-- 2: slide 11 -->
 <section class="page" data-sec="INFERENCE">
-  <div class="slide-tag">Slide 11 · LLM vs TTS<span class="tm">~55s</span></div>
+  <div class="slide-tag">Slide 11 · LLM vs TTS<span class="tm">~55s · set the thesis</span></div>
   <h2>TTS Inference <span class="en">Is Not</span> LLM Inference</h2>
   <div class="script">
-    <p>OK — inference. This is where I want to spend the rest of our time, because the punchline is: <b>TTS inference is not LLM inference, even when there's an LLM inside</b>.</p>
-    <p>LLM inference is one dominant decode loop. One model, one scheduler, text in, text out. The token you sample <b>is</b> the product — you flush it to the user and you're done.</p>
-    <p>TTS inference is a multi-stage audio-generation pipeline: preprocess, then a reference-audio encoder, then the AR engine, then a vocoder. The token you sample is just an intermediate — it's worthless until a second GPU model turns it into a waveform. The stages have different compute patterns, different latency budgets, and you're balancing real-time latency against audio quality, not just maximizing throughput.</p>
+    <p>Thanks — I'll take the inference part. And I want to start with the punchline up front: <b>TTS inference is not LLM inference, even when there's an LLM inside</b>.</p>
+    <p>LLM inference is one dominant decode loop. One model, one scheduler, text in, text out. The token you sample <b>is</b> the product — you flush it to the user and you're done. The whole system optimizes time-to-first-token, throughput, and KV reuse.</p>
+    <p>TTS inference is a <b>multi-stage audio-generation pipeline</b>: preprocess, then a reference-audio encoder, then the AR engine, then a vocoder. The token you sample is just an intermediate — it's worthless until a second GPU model turns it into a waveform. The stages have different compute patterns, different latency budgets, and may want different schedulers. And the goal shifts: you're balancing real-time latency, smooth streaming, and audio quality — not just maximizing text serving efficiency.</p>
   </div>
 </section>
 
-<!-- 13: slide 12 -->
+<!-- 3: slide 12 -->
 <section class="page" data-sec="INFERENCE">
   <div class="slide-tag">Slide 12 · SGLang-Omni Overview<span class="tm">~60s</span></div>
   <h2>Declare Stages, <span class="en">Choose Schedulers</span></h2>
   <div class="script">
-    <p>So we built the serving layer on SGLang-Omni, and the design philosophy fits on one line: declare stages, choose schedulers, and let the runtime handle routing, streaming, and resource isolation.</p>
-    <p>A Coordinator routes requests across the four stages. Each stage picks the scheduler that fits its job: preprocessing gets a CPU-side thread pool; the encoder gets a lean single-threaded scheduler; the AR engine runs the full <b>OmniScheduler</b> — which inherits SGLang's continuous batching, radix cache, and CUDA graph support; and the vocoder gets a streaming-aware scheduler. Underneath, a ZMQ control plane and a relay data plane move tensors over shared memory, NCCL, or CUDA IPC, and every stage declares its own GPU memory budget up front.</p>
+    <p>So we built the serving layer on SGLang-Omni, and the design philosophy fits on one line: <b>declare stages, choose schedulers, define topology — and let the runtime handle routing, streaming, data movement, and resource isolation</b>.</p>
+    <p>A Coordinator routes requests across the four stages. Each stage picks the scheduler that fits its job: preprocessing gets a lightweight CPU-side scheduler; the encoder gets a lean single-threaded one; the AR engine runs the full <b>OmniScheduler</b> — which inherits SGLang's continuous batching, KV cache and tree cache, and CUDA graph support; and the vocoder gets a streaming-aware Code2Wav scheduler with two execution modes — batched full-WAV, or streaming chunks over SSE.</p>
+    <p>Underneath: a ZMQ control plane for messages, a relay data plane for tensors — shared memory, NCCL, or CUDA IPC — and per-stage GPU memory budgets declared up front, so colocated stages can't starve each other.</p>
     <p class="beat">One detail I love: PR 476 <b>deleted</b> our bespoke HiggsScheduler and replaced it with the shared one. Less custom code, more inherited optimization.</p>
   </div>
 </section>
 
-<!-- 14: slide 13 -->
+<!-- 4: slide 13 -->
 <section class="page" data-sec="INFERENCE">
   <div class="slide-tag">Slide 13 · Disaggregated Stages<span class="tm">~40s</span></div>
   <h2>Same Request = <span class="en">Ordered Stages</span></h2>
   <div class="script">
-    <p>Why stages? This slide is the answer.</p>
-    <p>If one worker owns the whole pipeline end to end, request two waits for <b>all</b> of request one — even when the encoder is free and only the AR engine is busy. Disaggregate the stages into independent queues, and each request still flows in order — preprocess, encode, generate, vocode — but <b>different</b> requests overlap freely: while request one is in the vocoder, request two is mid-decode and request three is being encoded.</p>
-    <p class="beat">Same per-request order, less blocking, better scheduling, higher utilization. One slow stage stops blocking everything.</p>
+    <p>Why stages at all? This slide is the answer.</p>
+    <p>If one coupled worker owns the whole pipeline end to end, request two waits for <b>all</b> of request one — even when the encoder is free and only the AR engine is busy. Disaggregate the stages into independent queues, and each request still flows in order — preprocess, encode, generate, vocode — but <b>different requests overlap freely</b>: while request one is in the vocoder, request two is mid-decode and request three is being encoded.</p>
+    <p class="beat">Same per-request order. Less blocking, better scheduling, higher utilization — one slow stage stops blocking everything.</p>
   </div>
 </section>
 
-<!-- 15: slide 14 -->
+<!-- 5: slide 14 -->
 <section class="page" data-sec="INFERENCE">
   <div class="slide-tag">Slide 14 · Preprocessing<span class="tm">~35s</span></div>
   <h2>Stage 1: <span class="en">Preprocessing</span></h2>
   <div class="script">
     <p>Now one slide per stage, in pipeline order.</p>
-    <p>Preprocessing parses the request, normalizes text and inline control tokens, validates the reference audio. Almost zero FLOPs — it's pure CPU and I/O work. The insight is that its real cost is <b>boundary overhead</b>, not compute.</p>
-    <p>So we run it on a CPU thread pool that preps several requests in parallel, and we let the encoder path absorb nearby preprocessing work to cut a stage boundary. The GPU never waits on I/O — by the time it finishes one request, the next is already prepped.</p>
+    <p>Preprocessing parses the speech request, normalizes text and inline control tokens, validates the reference audio, and builds the stage-native request objects. Almost zero FLOPs — it's pure CPU and I/O work. The profiling insight: its real cost is <b>boundary overhead</b>, not compute.</p>
+    <p>So it runs on a CPU-side thread pool that preps several requests in parallel, and the encoder path can absorb nearby preprocessing work to cut a stage boundary. Simple requests with no reference audio take a fast path. Net effect: <b>the GPU never waits on I/O</b> — by the time it finishes one request, the next is already prepped.</p>
   </div>
 </section>
 
-<!-- 16: slide 15 -->
+<!-- 6: slide 15 -->
 <section class="page" data-sec="INFERENCE">
   <div class="slide-tag">Slide 15 · The Encoder<span class="tm">~50s</span></div>
   <h2>Stage 2: <span class="en">The Reference-Audio Encoder</span></h2>
   <div class="script">
-    <p>The reference-audio encoder converts your voice sample into conditioning tokens. It costs 50 to 100 milliseconds — and here's the profile finding: it's <b>deterministic and it's repetitive</b>. Users reuse the same handful of voices across thousands of prompts. Most encoder work is recomputing answers we already know.</p>
-    <p>So: an <b>LRU cache</b> keyed by the reference audio — repeat voices skip the encoder entirely. <b>Batched encoding</b> for utilization — though we learned to keep that for offline warmup, because online batching caused GPU contention with the latency-critical decode loops. And <b>torch.compile</b>, which is a genuinely good fit here — static shapes, convolutional stack, no branching.</p>
+    <p>The reference-audio encoder converts your voice sample into speaker-conditioning tokens. It costs 50 to 100 milliseconds — and here's the profile finding: it's <b>deterministic and it's repetitive</b>. Users reuse the same handful of voices across thousands of prompts. Most encoder work is recomputing answers we already know.</p>
+    <p>So, three moves. An <b>LRU cache</b> keyed by the reference audio — repeat voices skip the encoder entirely. <b>Batched encoding</b> for utilization — though we learned a production lesson there: online batching caused GPU contention with the latency-critical decode loops, so we keep the batch win for offline warmup and encode in isolation online. And <b>torch.compile</b>, which is a genuinely good fit here — static shapes, a convolutional stack, no branching.</p>
+    <p class="beat">Key idea: the encoder stage becomes much cheaper when reuse, batching, and boundary reduction are handled explicitly.</p>
   </div>
 </section>
 
-<!-- 17: slide 16 -->
+<!-- 7: slide 16 -->
 <section class="page" data-sec="INFERENCE">
-  <div class="slide-tag">Slide 16 · The AR Engine<span class="tm">~100s — the core slide</span></div>
+  <div class="slide-tag">Slide 16 · The AR Engine<span class="tm">~100s — THE CORE SLIDE</span></div>
   <h2>Stage 3: <span class="en">CUDA Graphs &amp; Async Decode</span></h2>
   <div class="script">
     <p>The AR engine is the dominant stage, so this is where the heavy machinery goes. Ten seconds of speech is 400 to 800 decode steps, and each step's overhead multiplies by that count. A tenth of a millisecond per step is <b>80 milliseconds per request, gone</b>.</p>
     <p>Two foundations come free from reusing the shared scheduler: <b>paged attention</b>, which lets sixteen concurrent decode loops share one H100 without fragmenting KV memory, and the <b>radix cache</b>, namespaced per reference voice, so repeated voices skip the prompt prefill — it stacks with the encoder's LRU.</p>
     <p>The biggest lever is <b>CUDA Graphs</b>. Without them, the CPU launches every small kernel one by one — each launch costs 5 to 10 microseconds, and the GPU starves between launches. A CUDA graph captures the whole decode step once and replays it with a single cheap launch. The catch: the capture is frozen — no data-dependent branching — so we rewrote the delay-pattern state machine as branchless, in-place tensor operations on fixed buffers. <b>Control flow became data flow.</b></p>
-    <p>And then one more bubble: every step ends with a heavy host-side collect — sampler-state scatter, delay-pattern bookkeeping, end-of-stream handling — in Python, every step, with the GPU idle through all of it. The fix is <b>async decode</b>: a launch-first, one-step lookahead. We split the step into a launch half — forward, on-GPU sampling, an async copy into a pinned ping-pong buffer — and a resolve half, the host collect. The loop launches step N, then resolves step N−1, so the previous step's collect hides under the current forward.</p>
+    <p>And then one more bubble: every step ends with a heavy host-side collect — sampler-state scatter, delay-pattern bookkeeping, end-of-stream handling — in Python, every step, with the GPU idle through it. The fix is <b>async decode</b>: a launch-first, one-step lookahead. We split the step into a launch half — forward, on-GPU sampling, an async copy into a pinned ping-pong buffer — and a resolve half, the host collect. The loop launches step N, then resolves step N minus one, so the previous step's collect hides under the current forward.</p>
     <p class="beat">Output is bit-identical with it on or off — and on the full benchmark at concurrency sixteen it's worth another 12.7% throughput, 16% off mean latency, and the tail RTF, p99, drops by almost 40 percent. The longer the request, the more it pays.</p>
   </div>
 </section>
 
-<!-- 18: slide 17 -->
+<!-- 8: slide 17 -->
 <section class="page" data-sec="INFERENCE">
   <div class="slide-tag">Slide 17 · The Vocoder<span class="tm">~60s</span></div>
   <h2>Stage 4: <span class="en">Streaming Without the Clicks</span></h2>
   <div class="script">
-    <p>Last stage: the vocoder, codebook tokens to 24-kilohertz waveform. Fast per call — about ten milliseconds — but it has two traps.</p>
-    <p><b>Trap one: queueing.</b> Every decode loop converges here, so under load it becomes a tail-latency source. Fix: batched vocoder decode — collect requests in a two-millisecond window, decode as one batch.</p>
-    <p><b>Trap two: streaming.</b> You cannot chunk audio the way you chunk text — the codec carries convolutional state across time, and naive chunk boundaries produce an audible click at every seam. So the streaming path decodes in overlapping windows: accumulate codes to a stride, backtrack into the previous window and re-decode jointly, crossfade the overlap, and hold back the final frames whose codebooks haven't filled yet.</p>
-    <p class="beat">Result: real SSE streaming, no clicks — first audio in roughly 350 milliseconds, well under the conversational threshold.</p>
+    <p>Last stage: the vocoder — codebook tokens to 24-kilohertz waveform. Fast per call, about ten milliseconds, but it has two traps.</p>
+    <p><b>Trap one: queueing.</b> Every decode loop converges here, so under load it becomes a tail-latency source. Fix: batched vocoder decode — collect requests in a tight window, decode as one batch.</p>
+    <p><b>Trap two: streaming.</b> You cannot chunk audio the way you chunk text — the codec carries convolutional state across time, and naive chunk boundaries produce an audible click at every seam. So the streaming path decodes in overlapping windows: accumulate codes to a stride, backtrack into the previous window and re-decode jointly, crossfade the overlap, and hold back the final frames whose codebooks haven't filled yet. The chunk and done lifecycle is managed by the streaming scheduler, with real SSE output.</p>
+    <p class="beat">Vocoder performance is not only raw decode speed — it's batching, streaming lifecycle, and output smoothness. First audio lands in roughly 350 milliseconds, well under the conversational threshold.</p>
   </div>
 </section>
 
-<!-- 19: slide 18 -->
+<!-- 9: slide 18 -->
 <section class="page" data-sec="INFERENCE">
-  <div class="slide-tag">Slide 18 · Performance<span class="tm">~45s</span></div>
+  <div class="slide-tag">Slide 18 · Performance<span class="tm">~45s · land the numbers</span></div>
   <h2>What Does All of That <span class="en">Buy?</span></h2>
   <div class="script">
     <p>One H100, full Seed-TTS English set.</p>
     <p>At concurrency one: 617 milliseconds mean latency, real-time factor <b>0.147</b> — that's seven times faster than real time. Scale to concurrency sixteen: 14.7 requests per second, generating almost <b>62 seconds of audio every second</b>, and the real-time factor is still only 0.26. Sixteen times the load, latency grows less than two-x. That's the multi-stage async design absorbing load.</p>
-    <p class="beat">And the guardrail throughout the whole optimization roadmap was: no model performance regression. Speed was never traded for WER.</p>
+    <p class="beat">And the guardrail throughout the whole roadmap was: no model performance regression. Speed was never traded for WER. That's the inference story — back to you / happy to take questions.</p>
   </div>
 </section>
 
-<!-- 20: slide 19 -->
-<section class="page" data-sec="CLOSING">
-  <div class="slide-tag">Slide 19 · Community<span class="tm">~25s</span></div>
-  <h2>Powered by the <span class="en">Open-Source Community</span></h2>
-  <div class="script">
-    <p>This model is already living in the ecosystem. There's a ComfyUI integration for node-based workflows, and MLX-Audio runs it on Apple Silicon. Both community-built, within days.</p>
-    <p>And we'd love your contributions — fine-tuning for smaller languages, quantization, CPU inference. If any of those sound fun, the repos are open.</p>
-  </div>
-</section>
-
-<!-- 21: slides 20-21 -->
-<section class="page" data-sec="CLOSING">
-  <div class="slide-tag">Slides 20–21 · Join Us<span class="tm">~30s</span></div>
-  <h2>We're <span class="en">Hiring</span></h2>
-  <div class="script">
-    <p>If this talk was fun for you, we're hiring in Santa Clara, on-site.</p>
-    <p>Two roles in particular. <b>Member of Technical Staff for Agent OS</b> — the core infrastructure behind our agentic systems: dialog engines, distributed memory, orchestration; Rust, Python, Go or C++, three-plus years in distributed systems. And <b>MTS for Product Frontend</b> — owning the Boson Workspace and the model playground, real-time voice UIs; Next.js, React, TypeScript.</p>
-    <p class="beat">jobs.lever.co/bosonai — or just come talk to me after.</p>
-  </div>
-</section>
-
-<!-- 22: slide 22 -->
-<section class="page" data-sec="CLOSING">
-  <div class="slide-tag">Slide 22 · Thank You<span class="tm">~25s</span></div>
-  <h2>Thank <span class="en">You</span></h2>
-  <div class="script">
-    <p>To wrap up: an open 4B model that clones voices in 110-plus languages with inline emotional control, a codec that makes speech a token-prediction problem, and a serving stack that makes those tokens stream faster than real time on one GPU.</p>
-    <p class="beat">Voice is the interface, and it belongs to the open ecosystem. Thank you — happy to take questions.</p>
-  </div>
-</section>
-
-<!-- 23: QA -->
+<!-- 10: QA -->
 <section class="page" data-sec="Q&A PREP">
   <div class="slide-tag">Backup · Anticipated Q&amp;A<span class="tm">keep open during questions</span></div>
-  <h2>Anticipated <span class="en">Q&amp;A</span></h2>
+  <h2>Inference <span class="en">Q&amp;A</span></h2>
   <div class="script qa">
-    <p class="q">Why 4B and not bigger?</p>
-    <p class="a">The latency budget. Conversational TTS needs sub-500ms first audio; 4B holds single-digit WER across 110+ languages while serving at RTF 0.147 on a single H100. Bigger buys little quality, costs real latency.</p>
-    <p class="q">Why AR + codec over flow/diffusion?</p>
-    <p class="a">Serving leverage: discrete tokens inherit the entire LLM inference stack — continuous batching, radix cache, CUDA graphs. Flow heads need a separate sampling stage that's harder to batch and stream.</p>
-    <p class="q">Doesn't the delay pattern hurt quality vs flattening?</p>
-    <p class="a">The coarse-to-fine offset preserves the conditioning structure — codebook k sees codebook k−1's current frame. Benchmarks show no quality regression, and decoding is ~8× shorter.</p>
-    <p class="q">How much reference audio for cloning?</p>
-    <p class="a">A few seconds. More helps prosody matching; cache + radix make repeated voices nearly free.</p>
     <p class="q">Is async decode safe — doesn't lookahead change outputs?</p>
-    <p class="a">No — only the host collect is deferred one step; the token causal chain stays on the GPU. Outputs verified bit-identical ON vs OFF (greedy, bs=1 and bs=4, 100/100), and bs=1 takes a sync fast path since there's nothing to overlap.</p>
-    <p class="q">What about voice-cloning misuse?</p>
-    <p class="a">API-level controls and usage policies; the open release ships with responsible-use terms — happy to discuss offline.</p>
+    <p class="a">No — only the host collect is deferred one step; the token causal chain stays on the GPU. Outputs verified bit-identical ON vs OFF (greedy, bs=1 and bs=4, 100/100). bs=1 takes a sync fast path since there's nothing to overlap — break-even by design.</p>
+    <p class="q">Why not torch.compile on the AR backbone too?</p>
+    <p class="a">Manual CUDA graphs already removed the launch overhead, so compile added only marginal throughput but a heavy cold-start penalty. It also exposed an upstream Inductor × CUDA-graph-capture interaction at batch ≥ 16 that drove WER to ~100% — we capped the compiled batch size and dropped it from the backbone. It stays on the encoder, where it genuinely fits.</p>
+    <p class="q">How does the delay pattern survive CUDA graph capture?</p>
+    <p class="a">The state machine was rewritten as branchless, in-place tensor ops on pre-allocated fixed-address buffers — masked arithmetic instead of if/else. The graph replays the same kernel sequence; per-request state is swapped in and out through shadow buffers, GPU-to-GPU.</p>
+    <p class="q">Why is batched encoding offline-only?</p>
+    <p class="a">In isolation it's a real throughput win. Online, encode bursts grabbed SMs from the latency-critical decode loops — per-encode cost down, end-to-end tails worse. So the batch win is harvested at server warmup to pre-fill the voice cache; the online path encodes in isolation.</p>
+    <p class="q">What bounds streaming TTFB?</p>
+    <p class="a">An irreducible floor: the vocoder needs at least N rows (N = codebooks) to invert the delay pattern, plus the window stride. Measured TTFB is ~300–400ms — under the 500ms conversational bar.</p>
+    <p class="q">Does this scale beyond one GPU?</p>
+    <p class="a">Stages are declared with explicit GPU placement and per-stage memory budgets; TP expansion applies to the AR stage, and the data plane already speaks NCCL/shm/CUDA-IPC. Cross-node multi-stage pipelines are on the roadmap.</p>
   </div>
 </section>
 
@@ -397,7 +252,7 @@ b{color:var(--paper);font-weight:500}
   const prog=document.getElementById('prog'),cur=document.getElementById('cur'),tot=document.getElementById('tot'),sec=document.getElementById('secLabel');
   tot.textContent=pages.length;
   let i=Math.min(pages.length-1,Math.max(0,parseInt(location.hash.slice(1))-1||0));
-  function show(n,dir){
+  function show(n){
     n=Math.max(0,Math.min(pages.length-1,n));
     pages.forEach((p,k)=>{
       p.classList.remove('active','back');
