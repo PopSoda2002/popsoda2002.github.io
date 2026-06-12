@@ -728,7 +728,7 @@ footer.site .sig{font-family:var(--mono);font-size:11px;letter-spacing:.15em;tex
         <h3>3 · AR Engine</h3>
         <p>Qwen3-4B backbone emits 8 codebook tokens per step under the delay pattern. 400–800 steps per 10s of speech.</p>
         <span class="mono-note">step-by-step → [B, 8, V]</span>
-        <div class="opts"><span>CUDA graph</span><span>radix cache</span><span>paged attention</span><span>merged D2H</span></div>
+        <div class="opts"><span>CUDA graph</span><span>radix cache</span><span>paged attention</span><span>async decode</span></div>
       </div>
       <div class="node">
         <span class="tag gpu">GPU · FAST BUT QUEUE-PRONE</span>
@@ -861,11 +861,13 @@ footer.site .sig{font-family:var(--mono);font-size:11px;letter-spacing:.15em;tex
           <p class="fig-cap">The recording is <b class="bad">frozen</b> — so the delay-pattern state machine was rewritten as branchless, in-place tensor ops on fixed buffers: control flow turned into data flow. (<a href="https://github.com/sgl-project/sglang-omni/pull/503" target="_blank" style="border:none">#503</a>)</p>
         </div>
         <div class="move">
-          <div class="m-name"><span class="mk">D2H</span>Merge three syncs into one</div>
-          <p>The baseline checked tokens and state with <b>three</b> separate device-to-host syncs per step. All of it now lands in one staging tensor and crosses in a single transfer.</p>
-          <div class="tl" id="tlD2h"></div>
-          <p class="fig-cap">Each red tick is a D2H sync — a full pipeline stall. One staging tensor leaves <b>one stall per step instead of three</b>. With the CUDA graph above, single-request RTF lands at <b>0.147</b>.</p>
-          <div class="pr-row"><a class="pr" href="https://github.com/sgl-project/sglang-omni/issues/564" target="_blank">#564</a><a class="pr" href="https://github.com/sgl-project/sglang-omni/pull/572" target="_blank">#572</a></div>
+          <div class="m-name"><span class="mk">ASYNC</span>Async decode — launch-first one-step lookahead</div>
+          <p>Every step ends with a heavy <b>host-side collect</b>: sampler-state scatter, delay-pattern bookkeeping, EOC/finish handling, and a D2H of the codes snapshot — in Python, every step. The GPU used to sit idle through all of it.</p>
+          <p>The fix splits <code>execute()</code> in two: <b>launch</b> (forward + on-GPU sample + async D2H into a pinned <b>ping-pong buffer</b> + CUDA event) and <b>resolve</b> (the host collect). The loop runs <code>launch(N)</code> then <code>resolve(N−1)</code> — step N−1's CPU collect hides under step N's forward:</p>
+          <div class="tl" id="tlSyncDec"><div class="tl-title bad"><b>✕ SYNC</b> — GPU idles through every step's host collect</div></div>
+          <div class="tl" id="tlAsyncDec"><div class="tl-title good"><b>✓ ASYNC LOOKAHEAD</b> — forwards run back-to-back; collect(N−1) overlaps forward(N)</div></div>
+          <p class="fig-cap">Output is <b>bit-identical</b> ON vs OFF; bs=1 takes a sync fast path (break-even by design — nothing to overlap). Full SeedTTS-EN @ concurrency 16: throughput <b>+12.7%</b>, mean latency <b>−16.1%</b>, RTF p99 <b>−39%</b> — the win grows with batch size and tail length.</p>
+          <div class="pr-row"><a class="pr" href="https://github.com/sgl-project/sglang-omni/pull/590" target="_blank">#590</a></div>
         </div>
         </div>
     </div>
@@ -1128,17 +1130,29 @@ tlMake('tlLru',{period:8,lanes:[
   {label:'req 3 · voice B',segs:[{t0:.40,t1:.68,cls:'c-enc',label:'encode (miss)'},{t0:.68,t1:.90,cls:'c-ar',label:'AR'}]}
 ]});
 
-/* 04B — D2H: 3 syncs vs 1 per step */
-tlMake('tlD2h',{period:7,lanes:[
-  {label:'3 syncs / step',segs:[
-    {t0:.02,t1:.18,cls:'c-ar',label:'step t'},{t0:.18,t1:.22,cls:'c-sync'},{t0:.24,t1:.28,cls:'c-sync'},{t0:.30,t1:.34,cls:'c-sync'},
-    {t0:.34,t1:.50,cls:'c-ar',label:'step t+1'},{t0:.50,t1:.54,cls:'c-sync'},{t0:.56,t1:.60,cls:'c-sync'},{t0:.62,t1:.66,cls:'c-sync'}],
-    marks:[{t:.66,html:'2 steps · 66%',dim:true}]},
-  {label:'1 sync / step',segs:[
-    {t0:.02,t1:.18,cls:'c-ar',label:'step t'},{t0:.18,t1:.22,cls:'c-sync'},
-    {t0:.22,t1:.38,cls:'c-ar',label:'step t+1'},{t0:.38,t1:.42,cls:'c-sync'},
-    {t0:.42,t1:.58,cls:'c-ar',label:'step t+2'},{t0:.58,t1:.62,cls:'c-sync'}],
-    marks:[{t:.62,html:'3 steps in the same time'}]}
+/* 04B — async decode: sync vs launch-first one-step lookahead (#590) */
+tlMake('tlSyncDec',{period:8,lanes:[
+  {label:'GPU',segs:[
+    {t0:.02,t1:.20,cls:'c-ar',label:'forward N'},
+    {t0:.32,t1:.50,cls:'c-ar',label:'forward N+1'},
+    {t0:.62,t1:.80,cls:'c-ar',label:'forward N+2'}]},
+  {label:'CPU',segs:[
+    {t0:.20,t1:.32,cls:'c-cpu',label:'collect N'},
+    {t0:.50,t1:.62,cls:'c-cpu',label:'collect N+1'},
+    {t0:.80,t1:.92,cls:'c-cpu',label:'collect N+2'}],
+    marks:[{t:.92,html:'3 steps · GPU idle 36%',dim:true}]}
+]});
+tlMake('tlAsyncDec',{period:8,lanes:[
+  {label:'GPU',segs:[
+    {t0:.02,t1:.20,cls:'c-ar',label:'forward N'},
+    {t0:.20,t1:.38,cls:'c-ar',label:'forward N+1'},
+    {t0:.38,t1:.56,cls:'c-ar',label:'forward N+2'}],
+    marks:[{t:.56,html:'3 steps · 38% sooner'}]},
+  {label:'CPU',segs:[
+    {t0:.21,t1:.33,cls:'c-cpu',label:'collect N'},
+    {t0:.39,t1:.51,cls:'c-cpu',label:'collect N+1'},
+    {t0:.57,t1:.69,cls:'c-cpu',label:'collect N+2'}],
+    marks:[{t:.69,html:'collect hides under the next forward',dim:true}]}
 ]});
 
 /* 04B — radix cache by voice */
