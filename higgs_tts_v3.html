@@ -1323,6 +1323,10 @@ tlMake('tlRace',{period:8,lanes:[
   if(urlKey){localStorage.setItem('boson_key',urlKey);history.replaceState(null,'',location.pathname+location.hash)}
   const apiKey=()=>(localStorage.getItem('boson_key')||'').trim();
   function say(msg,cls){status.innerHTML=cls?('<span class="'+cls+'">'+msg+'</span>'):msg}
+  if(!apiKey()){
+    say('No access key detected — this demo needs to be opened once via the shared link '+
+        '(<span class="mono">…/higgs_tts_v3.html?key=…</span>). After that, the plain URL works too.','err');
+  }
   const fmt=ms=>ms<1000?Math.round(ms)+' ms':(ms/1000).toFixed(2)+' s';
 
   /* ---- mic recording → WAV data URI ---- */
